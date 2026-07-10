@@ -94,7 +94,7 @@ function render() {
   let html = '<table><thead><tr><th>From</th><th>Task</th><th style="width:130px">Decision</th></tr></thead><tbody>';
   items.forEach((it, i) => {
     html += '<tr><td>' + esc(it.reporter || '?') +
-      '<div class="meta">' + esc(it.reportDate || '') + (it.origin === 'user' ? '<span class="pill">typed by user</span>' : '<span class="pill">whatsapp</span>') + '</div></td>' +
+      '<div class="meta">' + esc(it.reportDate || '') + (it.origin === 'user' ? '<span class="pill">typed by user</span>' : '<span class="pill">chat</span>') + '</div></td>' +
       '<td><div class="task">' + esc(it.name) + '</div>' +
       '<div class="meta">' + esc(it.project || '') + ' · ' + esc(it.status || 'open') + '</div></td>' +
       '<td><select data-i="' + i + '">' +
