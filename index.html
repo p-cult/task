@@ -1,15 +1,1452 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>
+(function () {
+  var API_ORIGIN = "https://param-task-middleware.onrender.com";
+  var _fetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    init = init || {};
+    var url = typeof input === 'string' ? input : (input && input.url);
+    if (url && url.charAt(0) === '/') { url = API_ORIGIN + url; }
+    if (init.credentials === undefined) { init.credentials = 'include'; }
+    var p = _fetch(url, init);
+    // Mirror the CSRF token from the session response into a first-party
+    // cookie so csrfToken() (which reads document.cookie) works cross-site.
+    if (url && url.indexOf('/api/session') >= 0) {
+      p.then(function (res) {
+        res.clone().json().then(function (d) {
+          if (d && d.csrfToken) {
+            document.cookie = 'ts2_csrf=' + d.csrfToken + '; Path=/; SameSite=Lax';
+          }
+        }).catch(function () {});
+      }).catch(function () {});
+    }
+    return p;
+  };
+  // Disable the dev-only live-reload stream (cross-origin, not needed live).
+  window.EventSource = function () {
+    return { close: function () {}, addEventListener: function () {}, set onmessage(v) {}, set onerror(v) {} };
+  };
+})();
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Param Task Sheet</title>
+
+<!--
+  ts-2 frontend — ONE file. Structure + behaviour + styling only.
+  No content is hard-coded here: every label comes from the master `content`
+  tab (via the middleware /api/content). Icons live once in the SVG symbol
+  block below and are reused by reference.
+
+  The topbar (Guide / role / sign out) is a SHARED component, not owned by
+  this page — see middleware/shared/topbar.{css,js}. The admin page loads
+  the exact same two files, so edit topbar look/behaviour there only.
+
+  .brand-copy/h1/.subtitle sizing is ALSO shared — see
+  middleware/shared/chrome.css. It's what keeps this page's header the
+  same height as the admin page's header at every viewport width, even
+  though the text differs. Do not redeclare those rules here.
+-->
+<style>
+/* Shared SKIN tokens — ONE file, the single source of truth for the whole
+   product's look. Loaded by BOTH the board (frontend/index.html) and the admin
+   page (middleware/admin/admin.html) via <link>, BEFORE topbar.css/chrome.css.
+
+   To reskin the entire app, change only the values here. Neither page keeps its
+   own copy of these tokens any more — that duplication is exactly what let the
+   two pages drift apart before (and once silently replaced "TASK SHEET" with
+   "PARAM"). Edit here only; do not re-add a :root token block to either page.
+
+   Light look only — dark mode intentionally not used. */
+:root {
+  --skin-bg:        #f7f4ee;
+  --skin-surface:   #fffdf8;
+  --skin-surface-strong: #f0ebe2;
+  --skin-ink:       #25221d;
+  --skin-ink-soft:  #6f675c;
+  --skin-accent:    #4f7a3a;
+  --skin-accent-ink:#ffffff;
+  --skin-line:      #ded5c8;
+  --skin-radius:    8px;
+  --skin-gap:       20px;
+  --skin-font:      ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --skin-shadow:    0 16px 42px rgba(32, 28, 22, 0.08);
+  --skin-pill-h:    27px; /* 20% shorter */
+  --pri-high:       #a63d4f;
+  --pri-medium:     #c99b25;
+  --pri-low:        #2f6f9f;
+  /* Task status colors */
+  --stat-assigned:  #4f7a3a;  /* medium sap green */
+  --stat-ongoing:   #c99b25;  /* medium chrome yellow */
+  --stat-paused:    #808080;  /* 30% grey */
+  --stat-rejected:  #d97766;  /* medium pastel brick red */
+  --stat-approved:  #4f7a3a;  /* medium sap green — shown as "Completed" */
+  --stat-completed: #9a9a9a;  /* grey: done, WAITING for approval */
+  --stat-revision:  #c99b25;  /* chrome yellow: sent back, work resumes */
+  --stat-cancelled: #55504a;  /* dark warm grey: closed without approval */
+}
+
+</style>
+<style>
+/* Shared topbar — ONE file, loaded by both the board (frontend/index.html)
+   and the admin page (middleware/admin/admin.html). Page-agnostic: it only
+   assumes the skin CSS variables (--skin-*) are already defined by the page
+   that includes it. Edit here only — do not fork a copy into either page. */
+.topbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 25px;
+  padding: 0 var(--skin-gap); background: var(--skin-surface); border-bottom: 0;
+  font-size: 12px; color: var(--skin-ink-soft); position: sticky; top: 0; z-index: 6;
+}
+.topbar-items { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+
+.topbar .devguide { margin: 0; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 20px; }
+.topbar .devguide input {
+  width: 14px; height: 14px; cursor: pointer; margin: 0 2px 0 0; accent-color: var(--skin-accent);
+  opacity: 1; pointer-events: auto; visibility: visible;
+  flex-shrink: 0;
+}
+.topbar .devguide .lbl { cursor: pointer; margin: 0; padding-left: 18px; font-size: 12px; color: var(--skin-ink-soft); }
+
+.topbar .user-tools { display: flex; gap: 8px; align-items: center; }
+.topbar .user-pill {
+  background: none; border: none; padding: 0; display: flex; align-items: center; gap: 4px;
+  color: var(--skin-ink-soft); font-size: 12px; height: auto;
+}
+.topbar .user-pill svg { width: 14px; height: 14px; fill: currentColor; }
+.topbar .user-pill-role { font-weight: 400; }
+.topbar .signout-button {
+  background: none; border: none; padding: 0; height: auto; width: auto; color: var(--skin-accent);
+  cursor: pointer; font-size: 12px; font-weight: 600; text-decoration: underline; font-family: inherit;
+}
+.topbar .signout-button:hover { opacity: 0.7; }
+.topbar .signin-link {
+  background: none; border: none; padding: 0; height: auto; width: auto; color: var(--skin-accent);
+  cursor: pointer; font-size: 12px; font-weight: 600; text-decoration: underline; font-family: inherit;
+}
+.topbar .signin-link:hover { opacity: 0.7; }
+
+</style>
+<style>
+/* Shared "chrome" typography — ONE file, loaded by both the board
+   (frontend/index.html) and the admin page (middleware/admin/admin.html).
+   This is what keeps the two headers the SAME HEIGHT at every viewport
+   width: both use the exact same .brand-copy/h1/.subtitle font-size,
+   line-height and gap, so their content boxes compute identically even
+   though the text differs (brand name vs "Admin · Reports"). Board and
+   admin headers also share identical padding/border in their own
+   page-specific header.app rules — keep those two padding values matching
+   this file's assumptions (16px vertical) if either page changes them.
+   Edit here only — do not fork a copy into either page. */
+.brand-copy { display: grid; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.brand-copy h1 {
+  margin: 0; font-weight: 900; font-size: clamp(1.35rem, 2.8vw, 1.9rem);
+  line-height: 1; letter-spacing: -0.02em;
+}
+.brand-copy .subtitle {
+  margin: 0; color: var(--skin-ink-soft); font-size: 0.72rem;
+  font-weight: 400; line-height: 1.2;
+}
+
+/* The round accent nav button — board→admin ("Admin reports") and admin→board
+   ("Back to board") are the SAME control. ONE definition here so they can't
+   drift apart. Both pages just drop in <a class="admin-button"> with a
+   sheet-driven icon inside. */
+.admin-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--skin-pill-h); height: var(--skin-pill-h);
+  background: var(--skin-accent);
+  border: 1px solid color-mix(in srgb, var(--skin-accent) 75%, #000 25%);
+  border-radius: 50%; color: #fff; cursor: pointer; text-decoration: none;
+  padding: 0; margin-left: 4px; flex: 0 0 auto;
+}
+.admin-button:hover { filter: brightness(1.05); }
+.admin-button svg { height: 16px; width: 16px; fill: none; }
+
+</style>
+
+<style>
+  /* ===== SKIN TOKENS live in middleware/shared/skin.css =====================
+     Loaded via <link> above, shared with the admin page so the look can never
+     drift between the two. To reskin the whole app, edit that ONE file.
+     Do not re-add a :root token block here. */
+  /* Light look only — dark mode intentionally not used. */
+  html { color-scheme: light; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--skin-font); background: var(--skin-bg);
+    color: var(--skin-ink); line-height: 1.5;
+  }
+  .icon { width: 1.1em; height: 1.1em; fill: currentColor; vertical-align: -.15em; }
+
+  /* Header ("topbar"): plain flexbox, not grid. Brand and controls are two
+     flex items that wrap onto their own line the moment they don't both fit
+     — driven by actual content width, not a fixed viewport breakpoint. (An
+     earlier grid-based version broke: CSS Grid sizes an "auto" track to a
+     flex child's UNWRAPPED width even when that child can flex-wrap, which
+     silently crushed the logo to zero width once the header had enough
+     controls — e.g. a signed-in admin's profile tag + Admin + sign out.) */
+  header.app {
+    display: flex; flex-wrap: wrap; align-items: center;
+    row-gap: 8px; column-gap: 16px;
+    padding: 16px var(--skin-gap); background: var(--skin-surface);
+    border-bottom: 1px solid var(--skin-line);
+    /* Sticky, pinned just below the 25px shared topbar — matches the admin
+       page so the header behaves identically when navigating between them. */
+    position: sticky; top: 25px; z-index: 5;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 200px; }
+  .brand-wordmark { display: inline-flex; align-items: center; height: clamp(31px, 4.3vw, 43px); max-width: clamp(155px, 27.5vw, 221px); width: auto; flex: 0 1 auto; min-width: 0; }
+  .brand-wordmark svg { height: 100%; width: auto; max-width: 100%; display: block; }
+  /* .brand-copy / h1 / .subtitle sizing lives in middleware/shared/chrome.css
+     (loaded via <link> above) — do not redeclare it here. */
+  .header-controls {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    justify-content: flex-end; flex: 0 1 auto; min-width: 0;
+  }
+
+  /* Topbar styling lives in middleware/shared/topbar.css (loaded via <link>
+     below) — it is the same file the admin page loads, so there is exactly
+     one place to edit it. Do not redeclare .topbar rules here. */
+
+  .sync-tools {
+    align-items: center; display: inline-flex; flex: 0 0 auto; gap: 0;
+    filter: drop-shadow(0 16px 42px rgba(32, 28, 22, 0.08));
+  }
+  .sync {
+    align-items: center; background: var(--skin-surface);
+    border: 1px solid color-mix(in srgb, var(--skin-surface) 75%, #000 25%);
+    border-radius: 999px 0 0 999px; border-right: 0; color: var(--skin-ink-soft);
+    display: inline-flex; font-size: 0.78rem; font-weight: 800; gap: 7px;
+    height: var(--skin-pill-h); line-height: 1; padding: 0 11px; white-space: nowrap;
+  }
+  .sync-dot { background: currentColor; border-radius: 999px; flex: 0 0 auto; height: 8px; width: 8px; }
+  .sync-date { font-size: 0.7rem; font-weight: 400; opacity: 0.82; }
+  .sync[data-state="updated"] { color: var(--skin-accent); }
+  .sync[data-state="stale"] { color: #c99b25; }
+  .sync[data-state="error"] { color: var(--pri-high); }
+  .sync[data-state="syncing"] { color: #d87524; }
+  .sync[data-state="syncing"] .sync-dot { animation: pulse 1s ease-in-out infinite; }
+  .sync-button {
+    align-items: center; background: var(--skin-accent);
+    border: 1px solid color-mix(in srgb, var(--skin-accent) 75%, #000 25%);
+    border-radius: 0 999px 999px 0; color: #fff; cursor: pointer;
+    display: inline-flex; height: var(--skin-pill-h); justify-content: center;
+    padding: 0; width: var(--skin-pill-h);
+  }
+  .sync-button:disabled { cursor: wait; opacity: 0.58; }
+  .sync-button svg { height: 16px; width: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+
+  .user-tools {
+    align-items: center; display: inline-flex; flex: 0 0 auto; gap: 0;
+    filter: drop-shadow(0 16px 42px rgba(32, 28, 22, 0.08));
+  }
+  .user-pill {
+    align-items: center; background: var(--skin-surface);
+    border: 1px solid color-mix(in srgb, var(--skin-surface) 75%, #000 25%);
+    border-radius: 999px 0 0 999px; border-right: 0; color: var(--skin-ink);
+    display: inline-flex; font-size: 0.78rem; font-weight: 700; gap: 7px;
+    height: var(--skin-pill-h); line-height: 1; padding: 0 11px; white-space: nowrap;
+  }
+  .user-pill-name { flex: 0 0 auto; }
+  .user-pill-role { flex: 0 0 auto; color: var(--skin-ink-soft); font-weight: 500; }
+  .signout-button {
+    align-items: center; background: var(--skin-accent);
+    border: 1px solid color-mix(in srgb, var(--skin-accent) 75%, #000 25%);
+    border-radius: 0 999px 999px 0; color: #fff; cursor: pointer;
+    display: inline-flex; height: var(--skin-pill-h); justify-content: center;
+    padding: 0 11px; font-size: 0.78rem; font-weight: 700;
+  }
+  .signout-button:hover { filter: brightness(1.05); }
+
+  /* .admin-button lives in middleware/shared/chrome.css (loaded via <link>),
+     shared with the admin page's back button. Do not redeclare here. */
+
+  .stale { display: none !important; }
+
+  /* Shown only when the page can't reach its own server (e.g. opened via
+     Live Server / file preview instead of the middleware). */
+  .offline {
+    display: none; margin: 0; padding: 10px var(--skin-gap);
+    background: #fde2e1; color: #8a1c17; font-size: 14px; text-align: center;
+    font-weight: 600;
+  }
+  .offline code { background: rgba(0,0,0,.06); padding: 1px 6px; border-radius: 4px; font-weight: 700; }
+  body[data-source="error"] .offline { display: block; }
+
+  main { padding: var(--skin-gap); max-width: 1180px; margin: 0 auto; }
+  .grid { display: grid; gap: var(--skin-gap); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .card {
+    background: var(--skin-surface); border: 1px solid var(--skin-line);
+    border-radius: var(--skin-radius); padding: 18px; box-shadow: var(--skin-shadow);
+  }
+  .card h2 { margin: 0 0 6px; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--skin-ink-soft); }
+  .card p  { margin: 0; color: var(--skin-ink-soft); font-size: 14px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 9px 16px; border: 0; border-radius: 999px;
+    background: var(--skin-accent); color: var(--skin-accent-ink);
+    font: inherit; font-weight: 600; font-size: 14px;
+  }
+  .btn.ghost { background: transparent; color: var(--skin-ink-soft); border: 1px solid var(--skin-line); }
+  footer { padding: 16px var(--skin-gap); color: var(--skin-ink-soft); font-size: 13px; text-align: center; }
+
+  .userchip { display: none; align-items: center; gap: 10px; }
+  .userchip .who { font-size: 14px; }
+  .userchip .who b { display: block; }
+  .userchip .who span { color: var(--skin-ink-soft); font-size: 12px; }
+
+  /* profile-gated sections: shown only when body[data-profile] is high enough */
+  [data-min-profile] { display: none; }
+  body[data-profile="2"] [data-min-profile="2"],
+  body[data-profile="3"] [data-min-profile="2"], body[data-profile="3"] [data-min-profile="3"],
+  body[data-profile="4"] [data-min-profile="2"], body[data-profile="4"] [data-min-profile="3"], body[data-profile="4"] [data-min-profile="4"] { display: block; }
+
+  .profile-tag { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--skin-accent); color: var(--skin-accent-ink); }
+
+  dialog {
+    border: 0; border-radius: var(--skin-radius); padding: 0; box-shadow: var(--skin-shadow);
+    background: var(--skin-surface); color: var(--skin-ink); width: 320px;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  .login { padding: 22px; }
+  .login h3 { margin: 0 0 14px; }
+  .login label { display: block; font-size: 13px; color: var(--skin-ink-soft); margin: 10px 0 4px; }
+  .login input { width: 100%; padding: 9px 11px; border: 1px solid var(--skin-line); border-radius: 8px; font: inherit; background: var(--skin-bg); color: var(--skin-ink); }
+  .login .row { display: flex; gap: 8px; margin-top: 16px; }
+  .login .err { color: #b3261e; font-size: 13px; min-height: 16px; margin-top: 8px; }
+  .hint { font-size: 12px; color: var(--skin-ink-soft); margin-top: 12px; }
+
+  /* ===== BOARD ============================================================= */
+  .summary-panel {
+    background: var(--skin-surface); border: 1px solid var(--skin-line);
+    border-radius: var(--skin-radius); box-shadow: var(--skin-shadow);
+    margin-bottom: var(--skin-gap); overflow: hidden;
+  }
+  .summary-panel-head {
+    align-items: center; display: flex; gap: 12px; justify-content: space-between;
+    min-height: 42px; padding: 10px 12px 10px 16px;
+  }
+  .summary-panel-title {
+    color: var(--skin-ink); font-size: 1.1rem; font-weight: 500;
+    letter-spacing: 0; text-transform: uppercase;
+  }
+  .summary-toggle {
+    align-items: center; background: var(--skin-ink); border: 1px solid color-mix(in srgb, var(--skin-ink) 75%, #fff 25%);
+    border-radius: 999px; color: #fff; cursor: pointer; display: inline-flex;
+    height: 30px; justify-content: center; width: 30px; padding: 0;
+  }
+  .summary-toggle svg {
+    height: 16px; width: 16px; fill: none; stroke: currentColor; stroke-width: 2.4;
+    transform: rotate(180deg); transition: transform 160ms ease;
+  }
+  .summary-panel.is-open .summary-toggle svg { transform: rotate(0deg); }
+  .summary-panel-body {
+    display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr);
+    max-height: 0; opacity: 0; overflow: hidden;
+    padding: 0 12px; transition: max-height 220ms ease, opacity 160ms ease, padding 220ms ease;
+  }
+  .summary-panel.is-open .summary-panel-body {
+    max-height: 420px; opacity: 1; padding: 0 12px 14px;
+  }
+  /* Overview (wireframe): three stat cards — label on top, big number below. */
+  .ov-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .ov-card {
+    align-items: center; background: var(--skin-surface);
+    border: 1px solid var(--skin-line); border-radius: 12px;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 4px; padding: 12px 10px; text-align: center;
+  }
+  .ov-card span { color: var(--skin-ink-soft); font-size: 0.78rem; font-weight: 400; }
+  .ov-card strong { display: block; font-size: 1.8rem; font-weight: 600; line-height: 1; }
+  /* Per-user strips: one row, horizontally scrollable, chevron nav each side. */
+  .ov-users { align-items: center; display: flex; gap: 8px; justify-content: center; }
+  .ov-strips {
+    display: flex; flex: 1 1 auto; gap: 14px; min-width: 0; overflow-x: auto;
+    scroll-behavior: smooth; scrollbar-width: none;
+  }
+  .ov-strips::-webkit-scrollbar { display: none; }
+  .ov-strip {
+    align-items: center; background: var(--skin-surface);
+    border: 1px solid var(--skin-line); border-radius: 10px;
+    display: flex; flex: 0 0 auto; gap: 10px; padding: 7px 14px;
+  }
+  .ov-strip-name { font-size: 0.95rem; font-weight: 500; white-space: nowrap; }
+  .ov-strip-dot { color: var(--skin-ink-soft); font-size: 0.45rem; }
+  .ov-strip-stat { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 46px; }
+  .ov-strip-stat small {
+    color: var(--skin-ink-soft); font-size: 0.58rem; font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .ov-strip-stat b { font-size: 1.05rem; font-weight: 500; line-height: 1.15; }
+  .ov-strip-sep { color: var(--skin-line); font-size: 1.15rem; font-weight: 300; }
+  .ov-nav {
+    align-items: center; background: var(--skin-surface); border: 1px solid var(--skin-ink);
+    border-radius: 50%; color: var(--skin-ink); cursor: pointer; display: inline-flex;
+    flex: 0 0 auto; height: 24px; justify-content: center; padding: 0; width: 24px;
+  }
+  .ov-nav:hover { background: var(--skin-surface-strong); }
+  .ov-nav[disabled] { opacity: 0.3; cursor: default; }
+  .ov-nav svg { height: 13px; width: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+  /* Sheet ChevronIcon points down at 0°: +90° → left, -90° → right. */
+  .ov-nav--prev svg { transform: rotate(90deg); }
+  .ov-nav--next svg { transform: rotate(-90deg); }
+
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tab {
+    align-items: center; background: var(--skin-surface-strong); border: 0;
+    border-radius: 12px 12px 0 0; color: var(--skin-ink-soft); cursor: pointer;
+    display: inline-flex; font: inherit; font-weight: 700; font-size: 14px;
+    gap: 10px; min-height: 44px; padding: 0 18px;
+  }
+  .tab.active { background: #6b8daa; color: #fff; }
+  .tab-count {
+    align-items: center; background: rgba(255,255,255,.86); border-radius: 999px;
+    color: var(--skin-ink-soft); display: inline-flex; font-size: 0.82rem;
+    height: 22px; justify-content: center; min-width: 22px; padding: 0 7px;
+  }
+  .tab.active .tab-count { color: #6b8daa; }
+  .toolbar .spacer { flex: 1; }
+
+  .filters {
+    background: var(--skin-surface); border: 1px solid var(--skin-line);
+    border-radius: var(--skin-radius); box-shadow: var(--skin-shadow);
+    display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: var(--skin-gap); padding: 12px 14px;
+  }
+  .filters select, .filters input {
+    padding: 8px 11px; border: 1px solid var(--skin-line); border-radius: 999px; font: inherit;
+    background: linear-gradient(180deg, var(--skin-surface), #fbf7ef); color: var(--skin-ink);
+  }
+  .filters input { min-width: 200px; }
+  .completed-filter { display: none; }
+  body.tab-completed .completed-filter { display: inline-block; }
+
+  .task-panel {
+    background: var(--skin-surface); border: 1px solid var(--skin-line);
+    border-radius: var(--skin-radius); box-shadow: var(--skin-shadow); overflow: hidden;
+  }
+  .task-panel-head {
+    border-bottom: 1px solid var(--skin-line); padding: 16px 18px 0;
+  }
+  .task-panel-title { font-size: 1.2rem; font-weight: 800; line-height: 1; margin: 0 0 12px; }
+  .task-list { display: grid; gap: 10px; padding: 12px; }
+  .task-card {
+    background: rgba(255, 253, 248, 0.74); border: 1px solid var(--skin-line);
+    border-radius: var(--skin-radius); display: grid; gap: 10px; padding: 14px 16px;
+  }
+  .task-row { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; }
+  .task-row--title { flex-wrap: wrap; row-gap: 4px; }
+  .task-title { font-size: 1.02rem; font-weight: 800; }
+  .task-project { color: var(--skin-ink-soft); font-size: 0.82rem; font-weight: 700; text-transform: uppercase; }
+  .task-inline-divider { color: var(--skin-ink-soft); margin: 0 6px; }
+  .task-desc, .task-note {
+    color: var(--skin-ink-soft); font-size: 0.9rem; line-height: 1.45; margin: 0;
+  }
+  .task-note { border-left: 2px solid var(--skin-line); padding-left: 10px; }
+  .deadline-inline {
+    align-items: center; color: var(--skin-ink-soft); display: inline-flex;
+    font-size: 0.85rem; gap: 6px; white-space: nowrap;
+  }
+  .assignee-pill {
+    align-items: stretch; display: inline-flex; height: var(--skin-pill-h); min-width: 0;
+  }
+  .assignee-pill__name {
+    align-items: center; background: #fff; border: 1px solid #bfbfbf; border-right: 0;
+    border-radius: 10px 0 0 10px; color: var(--skin-ink); display: inline-flex;
+    font-size: 0.75rem; font-weight: 400; max-width: 150px; overflow: hidden;
+    padding: 0 9px; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .assignee-pill__status {
+    align-items: center; background: var(--skin-ink); border: 1px solid #111;
+    border-radius: 0 10px 10px 0; color: #fff; display: inline-flex;
+    font-size: 0.75rem; font-weight: 400; justify-content: center;
+    min-width: var(--skin-pill-h); padding: 0 10px;
+  }
+  /* Status-based colors for assignee pill */
+  .assignee-pill__status.status-assigned { background: var(--stat-assigned); }
+  .assignee-pill__status.status-ongoing { background: var(--stat-ongoing); }
+  .assignee-pill__status.status-paused { background: var(--stat-paused); color: #fff; }
+  .assignee-pill__status.status-rejected { background: var(--stat-rejected); }
+  .assignee-pill__status.status-approved { background: var(--stat-approved); }
+  .assignee-pill__status.status-completed { background: var(--stat-completed); }
+  .assignee-pill__status.status-revision { background: var(--stat-revision); }
+  .assignee-pill__status.status-cancelled { background: var(--stat-cancelled); }
+  .chip {
+    align-items: center; border-radius: 999px; display: inline-flex;
+    font-size: 0.78rem; font-weight: 800; justify-content: center;
+    line-height: 1; min-height: 26px; padding: 0 10px;
+  }
+  /* Priority display: colored bullet point + text */
+  .priority {
+    align-items: center; display: inline-flex; gap: 4px;
+    font-size: 0.75rem; font-weight: 400;
+  }
+  .priority-dot {
+    flex: 0 0 auto; font-size: 0.96rem; line-height: 1; /* +20% size */
+  }
+  /* Symbol variants (who set the priority) — each glyph has a different
+     native ink size, so each gets its own correction to LOOK the same
+     size as the ● baseline, rather than sharing one font-size. */
+  .priority-dot.dot-admin { font-size: 1.47rem; } /* ⭑ ink-matched 1.13rem +30% by Vinod's eye (09-Jul) */
+  .priority-dot.dot-mod   { font-size: 0.90rem; } /* ⬟ ink-measured to match ● at 13px */
+  .pri-High .priority-dot { color: var(--pri-high); }
+  .pri-Medium .priority-dot { color: var(--pri-medium); }
+  .pri-Low .priority-dot { color: var(--pri-low); }
+  .pri-High { color: var(--skin-ink); }
+  .pri-Medium { color: var(--skin-ink); }
+  .pri-Low { color: var(--skin-ink); }
+  /* Overdue pulsate: base red to full saturation, 2-second cycle */
+  @keyframes pulsate-priority {
+    0%, 100% { color: var(--pri-high); opacity: 0.6; }
+    50% { color: #ff0000; opacity: 1; }
+  }
+  .priority.is-overdue .priority-dot {
+    animation: pulsate-priority 2s ease-in-out infinite;
+  }
+  .st-Completed { background: var(--skin-accent); color: #fff; }
+  .st-Assigned { background: #6b8daa; color: #fff; }
+  .st-InProgress { background: var(--pri-medium); color: #fff; }
+  .tag-approved { background: var(--skin-accent); color: #fff; }
+  .tag-logged { background: var(--skin-surface-strong); color: var(--skin-ink-soft); }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .empty { padding: 28px; text-align: center; color: var(--skin-ink-soft); }
+  .colhide { display: none; }
+
+  @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  @media (max-width: 760px) {
+    .overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ov-card strong { font-size: 1.4rem; }
+    .ov-strip-name { font-size: 0.88rem; }
+    header.app { row-gap: 8px; column-gap: 12px; padding: 12px 16px; }
+    .header-controls { justify-content: flex-start; gap: 6px; }
+  }
+
+  @media print {
+    header, .summary-panel, .filters, .toolbar, .offline, .devguide, .sync-tools { display: none !important; }
+    body { background: #fff; }
+    .task-card { page-break-inside: avoid; border: 1px solid #bbb; box-shadow: none; }
+  }
+
+  dialog.wide { width: min(560px, 92vw); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .form-grid label { display: block; font-size: 13px; color: var(--skin-ink-soft); margin: 0 0 4px; }
+  .form-grid input, .form-grid select, .form-grid textarea {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--skin-line); border-radius: 8px; font: inherit;
+    background: var(--skin-bg); color: var(--skin-ink);
+  }
+  .form-grid textarea { resize: vertical; min-height: 60px; }
+  .new-result { font-size: 13px; margin-top: 12px; min-height: 18px; }
+  .new-result.ok { color: var(--skin-accent); }
+  .new-result.bad { color: #b3261e; }
+  .task-card { cursor: default; }
+  .task-card.is-editable { cursor: pointer; }
+  .task-card.is-editable:focus-visible { outline: 2px solid var(--skin-accent); outline-offset: 2px; }
+  .task-card-actions { display: flex; gap: 8px; margin-top: 2px; }
+  .task-card-actions .btn { padding: 4px 10px; font-size: 12px; }
+  .locked-field {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--skin-line); border-radius: 8px;
+    background: var(--skin-surface); color: var(--skin-ink-soft); font: inherit;
+  }
+
+  /* ===== DEV GUIDE OVERLAY (purge at go-live) =============================
+     A dev-only toggle that outlines every tagged component and names it, as a
+     transparent reference guide while prompting for changes. To remove for
+     production, delete: this CSS block, the .devguide toggle markup in the
+     header, the DEV GUIDE <script> block, and every data-comp="…" attribute.
+     Search the file for "DEV GUIDE" / "data-comp". */
+  .devguide { display: flex; align-items: center; gap: 7px; margin-right: 4px; cursor: pointer; user-select: none; }
+  .devguide input { position: absolute; opacity: 0; pointer-events: none; }
+  .devguide .track { width: 34px; height: 18px; border-radius: 999px; background: var(--skin-line); position: relative; transition: background .15s; }
+  .devguide .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: left .15s; }
+  .devguide input:checked + .track { background: #e91e63; }
+  .devguide input:checked + .track::after { left: 18px; }
+  .devguide .lbl { font-size: 12px; color: var(--skin-ink-soft); }
+
+  body.guide-on [data-comp] { outline: 1px solid rgba(233,30,99,.7); outline-offset: -1px; }
+  body.guide-on [data-comp]:not(dialog) { position: relative; }
+  body.guide-on [data-comp]::after {
+    content: attr(data-comp);
+    position: absolute; top: 0; left: 0; z-index: 9999; pointer-events: none;
+    background: #e91e63; color: #fff; font: 600 10px/1.5 var(--skin-font);
+    padding: 0 5px; border-bottom-right-radius: 5px; letter-spacing: .3px; white-space: nowrap;
+  }
+  /* ===== end dev guide ==================================================== */
+</style>
 </head>
-<body>
+<body data-source="loading">
+
+<!-- Shared topbar: markup is injected here by /shared/topbar.js (same file
+     the admin page loads). Do not hand-author topbar markup in this page.
+     Loaded synchronously so #guideToggle exists before the DEV GUIDE script
+     near the bottom of this file runs. -->
+<div id="topbar-mount"></div>
 <script>
-  const API_BASE = 'https://param-task-middleware.onrender.com';
-  // Redirect to the actual frontend hosted on Render
-  window.location.href = API_BASE;
+/**
+ * Shared topbar — ONE file, loaded by both the board and the admin page.
+ * Injects its own markup into #topbar-mount, then wires role display and
+ * sign out. Page-agnostic: talks only to /api/session and /api/logout,
+ * which both pages already serve from the same middleware. Edit here only.
+ */
+(function () {
+  'use strict';
+  var PROFILE_NAME = { 1: 'Public Viewer', 2: 'User', 3: 'Moderator', 4: 'Super Admin' };
+
+  var mount = document.getElementById('topbar-mount');
+  if (!mount) return;
+
+  mount.outerHTML =
+    '<div class="topbar" data-comp="Topbar">' +
+      '<div class="topbar-items">' +
+        '<label class="devguide" title="Outline & name each component — dev reference only">' +
+          '<input type="checkbox" id="guideToggle">' +
+          '<span class="lbl">Guide</span>' +
+        '</label>' +
+        '<div class="user-tools" id="userTools" style="display:none">' +
+          '<span class="user-pill">' +
+            '<span id="topbarUserIcon"></span>' +
+            '<span class="user-pill-role" id="topbarRole">-</span>' +
+          '</span>' +
+          '<span style="color:var(--skin-ink-soft)">|</span>' +
+          '<button class="signout-button" id="topbarSignout" type="button">Sign out</button>' +
+        '</div>' +
+        '<button class="signin-link" id="topbarSignin" style="display:none">Sign in</button>' +
+      '</div>' +
+    '</div>';
+
+  function refresh() {
+    fetch('/api/session').then(function (r) { return r.json(); }).then(function (s) {
+      var loggedIn = s.profile > 1;
+      document.getElementById('userTools').style.display = loggedIn ? '' : 'none';
+      document.getElementById('topbarSignin').style.display = loggedIn ? 'none' : '';
+      if (loggedIn) document.getElementById('topbarRole').textContent = PROFILE_NAME[s.profile] || ('Profile ' + s.profile);
+      document.dispatchEvent(new CustomEvent('topbar:session', { detail: s }));
+    }).catch(function () {});
+  }
+
+  // The person icon is sheet-driven (content-tab key "UserIcon"), same
+  // mechanism as the board's Logo/AdminIcon — change the icon by editing
+  // that cell, not this file. /api/content is public on both pages.
+  fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
+    var icon = (d.content || {}).UserIcon;
+    if (icon) document.getElementById('topbarUserIcon').innerHTML = icon;
+  }).catch(function () {});
+
+  function csrfToken() {
+    var m = document.cookie.match(/(?:^|;\s*)ts2_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  document.getElementById('topbarSignout').addEventListener('click', function () {
+    fetch('/api/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken() } })
+      .then(function () { window.location.href = '/'; });
+  });
+  document.getElementById('topbarSignin').addEventListener('click', function () {
+    document.dispatchEvent(new CustomEvent('topbar:signin-click'));
+  });
+
+  window.topbarRefresh = refresh;
+  refresh();
+})();
+
+</script>
+
+<!-- Icons are no longer hard-coded here. Every icon used on this page is an
+     inline <svg> stored in a content-tab cell (SyncIcon, ChevronIcon,
+     ClockIcon, UserIcon, AdminIcon...) and injected via data-content-html
+     by applyContent(), same mechanism as the Logo. To change an icon,
+     replace the SVG in its sheet cell — nothing here needs to change. -->
+
+<header class="app" data-comp="Header">
+  <span class="brand" data-comp="Brand">
+    <span class="brand-wordmark" data-content-html="Logo" data-comp="BrandWordmark" aria-label="logo"></span>
+    <div class="brand-copy" data-comp="BrandCopy">
+      <h1 id="appTitle" data-content="SubHead">-</h1>
+      <p class="subtitle" id="subtitle" data-content="PageName">-</p>
+    </div>
+  </span>
+  <div class="header-controls" data-comp="HeaderControls">
+    <div class="sync-tools" data-comp="SyncTools">
+      <div class="sync" id="syncStatus" data-state="syncing" data-comp="SyncStatus">
+        <span class="sync-dot" aria-hidden="true"></span>
+        <span class="sync-text" id="syncText">…</span>
+      </div>
+      <button class="sync-button" id="syncButton" type="button" data-comp="SyncButton" aria-label="Sync latest data">
+        <span data-content-html="SyncIcon"></span>
+      </button>
+    </div>
+    <!-- Admin button aligned with sync tools -->
+    <a class="admin-button" id="adminLinkHeader" href="/admin" data-comp="AdminButtonHeader" data-min-profile-inline="4" style="display:none" title="Admin reports">
+      <span data-content-html="AdminIcon" style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"></span>
+    </a>
+  </div>
+</header>
+
+<p class="offline" data-comp="OfflineBar">Not connected to the app server. Open <code>http://localhost:4300</code> — not Live Server / file preview. Start it with <code>./run.sh</code> from the project folder.</p>
+<p class="stale" data-comp="StaleBar">Showing sample data — not connected to the live sheet yet.</p>
+
+<main data-comp="Main">
+  <p data-content="PublicNote" id="publicNote" data-comp="PublicNote" style="color:var(--skin-ink-soft);margin-top:0"></p>
+
+  <section class="summary-panel" id="summaryPanel" data-comp="SummaryPanel">
+    <div class="summary-panel-head">
+      <div class="summary-panel-title" data-content="Container-2">Overview</div>
+      <button class="summary-toggle" id="summaryToggle" type="button" aria-expanded="false" aria-controls="summaryBody" data-content-aria="Summary-Expand">
+        <span data-content-html="ChevronIcon"></span>
+      </button>
+    </div>
+    <div class="summary-panel-body" id="summaryBody">
+      <!-- Wireframe layout: label on top, big number below. Counts reflect the
+           profile-scoped task list, so each profile sees its own context. -->
+      <div class="ov-cards" data-comp="OverviewCards">
+        <div class="ov-card"><span data-content="Stat-Total">Total</span><strong id="statTotal">0</strong></div>
+        <div class="ov-card"><span data-content="Stat-Scheduled">Scheduled</span><strong id="statScheduled">0</strong></div>
+        <div class="ov-card"><span data-content="Stat-Completed">Completed</span><strong id="statCompleted">0</strong></div>
+      </div>
+      <!-- Per-person strips (name • total | scheduled | completed), scrollable
+           with chevron nav. Rendered by updateSummary(); hidden when the scoped
+           task list carries no assignees. -->
+      <div class="ov-users" id="ovUsers" data-comp="OverviewUsers" style="display:none">
+        <button class="ov-nav ov-nav--prev" id="ovPrev" type="button" aria-label="Previous"><span data-content-html="ChevronIcon"></span></button>
+        <div class="ov-strips" id="ovStrips"></div>
+        <button class="ov-nav ov-nav--next" id="ovNext" type="button" aria-label="Next"><span data-content-html="ChevronIcon"></span></button>
+      </div>
+    </div>
+  </section>
+
+  <div class="task-panel" data-comp="TaskPanel">
+    <div class="task-panel-head">
+      <h2 class="task-panel-title" data-content="Container-4">Task List</h2>
+      <div class="toolbar" data-comp="Toolbar">
+        <div class="tabs" id="tabs" data-comp="Tabs">
+          <button class="tab active" data-tab="all"><span data-content="Board-All">All Tasks</span> <span class="tab-count" id="tabCountAll">0</span></button>
+          <button class="tab" data-tab="mine" data-min-profile-inline="2" style="display:none"><span data-content="Board-Mine">My Tasks</span> <span class="tab-count" id="tabCountMine">0</span></button>
+          <button class="tab" data-tab="completed"><span data-content="Board-Completed">Completed</span> <span class="tab-count" id="tabCountCompleted">0</span></button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn" id="newTaskBtn" data-comp="NewTaskBtn" data-min-profile-inline="2" style="display:none">
+          + <span data-content="Board-New">New Task</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="filters" data-comp="Filters">
+      <select id="fProject"><option value="" data-content="Filter-All">All</option></select>
+      <select id="fStatus"><option value="" data-content="Filter-All">All</option></select>
+      <select id="fPriority"><option value="" data-content="Filter-All">All</option></select>
+      <input id="fSearch" type="search" placeholder="Search tasks" data-content-ph="Filter-Search">
+      <select id="fCompleted" class="completed-filter">
+        <option value="all"      data-content="CompletedFilter-All">All completed</option>
+        <option value="approved" data-content="CompletedFilter-Approved">Approved</option>
+        <option value="logged"   data-content="CompletedFilter-Logged">Logged</option>
+      </select>
+    </div>
+
+    <div class="task-list" id="taskList" data-comp="TaskList"></div>
+    <div class="empty" id="emptyRow" style="display:none" data-content="Empty-Tasks">No tasks to show.</div>
+  </div>
+</main>
+
+<footer data-content="Container-5" data-comp="Footer">·</footer>
+
+<dialog id="loginDlg" data-comp="LoginDialog">
+  <form class="login" id="loginForm" method="dialog">
+    <h3 data-content="LoginPrompt">Sign in</h3>
+    <label>Username</label>
+    <input id="lu" autocomplete="username" autofocus>
+    <label>Password</label>
+    <input id="lp" type="password" autocomplete="current-password">
+    <div class="err" id="loginErr"></div>
+    <div class="row">
+      <button class="btn" type="submit" style="flex:1">Sign in</button>
+      <button class="btn ghost" type="button" id="loginCancel">Cancel</button>
+    </div>
+    <p class="hint">Dev logins: harshit / ashwin / aishwarya / mod / admin — password <b>pass</b></p>
+  </form>
+</dialog>
+
+<dialog id="newDlg" class="wide" data-comp="NewTaskDialog">
+  <form class="login" id="newForm" method="dialog">
+    <h3 data-content="New-Title">Create a task</h3>
+    <div class="form-grid">
+      <div class="full">
+        <label data-content="New-Project">Project</label>
+        <select id="nProject"></select>
+      </div>
+      <div class="full">
+        <label data-content="New-Name">Task name</label>
+        <input id="nName" autocomplete="off">
+      </div>
+      <div class="full">
+        <label data-content="New-Desc">Description</label>
+        <textarea id="nDesc"></textarea>
+      </div>
+      <div>
+        <label data-content="New-Priority">Priority</label>
+        <select id="nPriority"><option>High</option><option selected>Medium</option><option>Low</option></select>
+      </div>
+      <div>
+        <label data-content="New-Deadline">Deadline</label>
+        <input id="nDeadline" placeholder="DD-MMM | HH:MM" autocomplete="off">
+      </div>
+      <div class="full">
+        <label data-content="New-Notes">Notes</label>
+        <input id="nNotes" autocomplete="off">
+      </div>
+    </div>
+    <div class="new-result" id="newResult"></div>
+    <div class="row">
+      <button class="btn" type="submit" style="flex:1" data-content="New-Save">Create task</button>
+      <button class="btn ghost" type="button" id="newCancel" data-content="New-Cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="editDlg" class="wide" data-comp="EditTaskDialog">
+  <form class="login" id="editForm" method="dialog">
+    <h3 data-content="Edit-Title">Edit task</h3>
+    <input type="hidden" id="eId">
+    <div class="form-grid">
+      <div class="full">
+        <label data-content="Edit-Project">Project</label>
+        <div class="locked-field" id="eProjectLabel" title="Project is locked — Task ID stays with the creating project"></div>
+      </div>
+      <div class="full">
+        <label data-content="Edit-Name">Task name</label>
+        <input id="eName" autocomplete="off">
+      </div>
+      <div class="full">
+        <label data-content="Edit-Desc">Description</label>
+        <textarea id="eDesc"></textarea>
+      </div>
+      <div>
+        <label data-content="Edit-Priority">Priority</label>
+        <select id="ePriority"><option>High</option><option>Medium</option><option>Low</option></select>
+      </div>
+      <div>
+        <label data-content="Edit-Status">Status</label>
+        <select id="eStatus"><!-- options built from the content tab (Status-Options) --></select>
+      </div>
+      <div class="full" id="eRevNoteWrap" hidden>
+        <label data-content="Edit-RevNote">Revision note (why is it going back?)</label>
+        <textarea id="eRevNote"></textarea>
+      </div>
+      <div class="full">
+        <label data-content="Edit-Deadline">Deadline</label>
+        <input id="eDeadline" placeholder="DD-MMM | HH:MM" autocomplete="off">
+      </div>
+      <div class="full">
+        <label data-content="Edit-Notes">Notes</label>
+        <input id="eNotes" autocomplete="off">
+      </div>
+    </div>
+    <div class="new-result" id="editResult"></div>
+    <div class="row">
+      <button class="btn" type="submit" style="flex:1" data-content="Edit-Save">Save changes</button>
+      <button class="btn ghost" type="button" id="editCancel" data-content="Edit-Cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const CONTENT = {};                 // filled from /api/content; used by the board too
+  const state = {
+    tab: 'all', tasks: [], projects: [], canWrite: false, profile: 1,
+    displayName: '', username: '',
+    dataStale: false, lastUpdated: null, summaryOpen: false, editingId: null,
+  };
+
+  // ===== DATA-TO-SCREEN LAYER ============================================
+  // One place that turns middleware data into what's on screen.
+  // Every element with data-content="KEY" gets its text from /api/content;
+  // data-content-ph="KEY" fills an input placeholder. Nothing is baked in here.
+  function applyContent(root) {
+    (root || document).querySelectorAll('[data-content]').forEach((el) => {
+      const v = CONTENT[el.getAttribute('data-content')];
+      if (v != null) el.textContent = v;
+    });
+    (root || document).querySelectorAll('[data-content-ph]').forEach((el) => {
+      const v = CONTENT[el.getAttribute('data-content-ph')];
+      if (v != null) el.placeholder = v;
+    });
+    // Rich content (SVG logo, icon markup, image tags) authored in the master
+    // `content` tab. Injected as HTML because the source is trusted (admin-only,
+    // server-delivered). data-content-html="KEY".
+    (root || document).querySelectorAll('[data-content-html]').forEach((el) => {
+      const v = CONTENT[el.getAttribute('data-content-html')];
+      if (v != null) el.innerHTML = v;
+    });
+  }
+  async function render() {
+    try {
+      const { content, source, stale } = await (await fetch('/api/content')).json();
+      Object.assign(CONTENT, content);
+      document.body.dataset.source = source;   // 'live' or 'dev' (sync pill uses this)
+      state.dataStale = !!stale || source === 'dev';
+      applyContent();
+      if (CONTENT.PageName) document.title = CONTENT.PageName;
+      updateSyncPill();
+    } catch (e) { document.body.dataset.source = 'error'; setSyncState('error'); }
+  }
+
+  // ===== SYNC STATUS =====================================================
+  function formatSyncTime(d) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const dt = d || new Date();
+    return pad2(dt.getDate()) + '-' + months[dt.getMonth()] + ' | ' + pad2(dt.getHours()) + ':' + pad2(dt.getMinutes());
+  }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+
+  function setSyncState(kind) {
+    const el = $('syncStatus');
+    const text = $('syncText');
+    el.dataset.state = kind;
+    const label = CONTENT['Sync-' + kind.charAt(0).toUpperCase() + kind.slice(1)]
+      || { updated: 'Updated', syncing: 'Syncing', error: 'Error', stale: 'Sample data' }[kind] || kind;
+    text.innerHTML = '';
+    if (kind === 'updated' && state.lastUpdated) {
+      text.append(document.createTextNode(label.toUpperCase() + '  '));
+      const d = document.createElement('span');
+      d.className = 'sync-date';
+      d.textContent = formatSyncTime(state.lastUpdated);
+      text.append(d);
+    } else if (kind === 'stale') {
+      text.textContent = label.toUpperCase() + ' — ' + (CONTENT['PublicNote'] || 'not live yet');
+    } else {
+      text.textContent = label.toUpperCase();
+    }
+    $('syncButton').disabled = (kind === 'syncing');
+    $('syncButton').setAttribute('aria-label', CONTENT['Sync-Button'] || 'Sync latest data');
+  }
+  function updateSyncPill() {
+    if (document.body.dataset.source === 'error') { setSyncState('error'); return; }
+    if (state.dataStale) { setSyncState('stale'); return; }
+    if (state.lastUpdated) { setSyncState('updated'); return; }
+    setSyncState('syncing');
+  }
+
+  async function triggerSync() {
+    setSyncState('syncing');
+    $('syncButton').disabled = true;
+    try {
+      const r = await postJson('/api/sync', {});
+      const d = await r.json();
+      if (!d.ok && d.error) setSyncState('error');
+    } catch (e) { setSyncState('error'); }
+    await loadBoard();
+  }
+
+  // ===== SESSION / PROFILE LAYER =========================================
+  const PROFILE_NAME = { 1: 'Public Viewer', 2: 'User', 3: 'Moderator', 4: 'Super Admin' };
+
+  // Every write echoes the double-submit CSRF token from its cookie back in a
+  // header. The server rejects any write where the two don't match.
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)ts2_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function writeJson(method, url, body) {
+    return fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+      body: JSON.stringify(body || {}),
+    });
+  }
+  function postJson(url, body) { return writeJson('POST', url, body); }
+  function patchJson(url, body) { return writeJson('PATCH', url, body); }
+
+  // Topbar (shared component) owns its own DOM + role/sign-out display —
+  // see middleware/shared/topbar.js. This just reacts to its session fetch
+  // for board-specific concerns (profile gating, tab fallback).
+  async function refreshSession() {
+    const s = await (await fetch('/api/session')).json();
+    document.body.dataset.profile = s.profile;
+    state.profile = s.profile || 1;
+    state.displayName = s.displayName || '';
+    state.username = s.username || '';
+    const loggedIn = s.profile > 1;
+    // inline profile-gated controls (Admin link only now)
+    document.querySelectorAll('[data-min-profile-inline]').forEach((el) => {
+      el.style.display = (s.profile >= +el.getAttribute('data-min-profile-inline')) ? '' : 'none';
+    });
+    $('publicNote').style.display = loggedIn ? 'none' : '';
+    // if the current tab is no longer allowed (e.g. after logout), fall back
+    if (state.tab === 'mine' && !loggedIn) selectTab('all');
+    await loadBoard();
+  }
+
+  // ===== BOARD ===========================================================
+  async function loadBoard() {
+    setSyncState('syncing');
+    try {
+      const [tasksRes, projRes] = await Promise.all([
+        fetch('/api/tasks').then((r) => r.json()),
+        fetch('/api/projects').then((r) => r.json()),
+      ]);
+      state.tasks = tasksRes.tasks || [];
+      state.canWrite = !!tasksRes.canWrite;
+      state.projects = projRes.projects || [];
+      state.dataStale = !!tasksRes.stale || tasksRes.source === 'dev' || state.dataStale;
+      state.lastUpdated = new Date();
+      buildFilterOptions();
+      fillProjectDropdown();
+      drawCards();
+      updateSyncPill();
+    } catch (e) {
+      setSyncState('error');
+    }
+  }
+
+  function isCompletedTask(t) { return !!(t.logged || t.approved || String(t.status).toLowerCase() === 'completed'); }
+  function scheduledTasks(list) { return (list || state.tasks).filter((t) => !isCompletedTask(t)); }
+  function completedTasks(list) { return (list || state.tasks).filter((t) => isCompletedTask(t)); }
+
+  /* Priority is computed by the middleware (middleware/priority.js) — the
+     single truth for board, reports, and API. Tasks arrive with .priority
+     (effective) and .overdue already stamped; the frontend only displays. */
+
+  function updateSummary() {
+    $('statTotal').textContent = String(state.tasks.length);
+    $('statScheduled').textContent = String(scheduledTasks().length);
+    $('statCompleted').textContent = String(completedTasks().length);
+    renderOverviewStrips();
+  }
+
+  /* Per-person strips. Built from the profile-scoped task list, so the
+     context follows the viewer: P1/P3/P4 see everyone, P2 sees themselves. */
+  function renderOverviewStrips() {
+    const byUser = new Map();
+    state.tasks.forEach((t) => {
+      const who = t.assignedTo || '';
+      if (!who) return;
+      if (!byUser.has(who)) byUser.set(who, { total: 0, scheduled: 0, completed: 0 });
+      const s = byUser.get(who);
+      s.total += 1;
+      if (isCompletedTask(t)) s.completed += 1; else s.scheduled += 1;
+    });
+    const row = $('ovUsers');
+    if (!byUser.size) { row.style.display = 'none'; return; }
+    row.style.display = '';
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const lbl = (k, fb) => esc(CONTENT[k] != null ? CONTENT[k] : fb);
+    const stat = (k, fb, n) => `<span class="ov-strip-stat"><small>${lbl(k, fb)}</small><b>${pad2(n)}</b></span>`;
+    $('ovStrips').innerHTML = [...byUser.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([who, s]) => `<div class="ov-strip">
+        <span class="ov-strip-name">${esc(assigneeLabel(who))}</span><span class="ov-strip-dot">●</span>
+        ${stat('Stat-Total', 'Total', s.total)}<span class="ov-strip-sep">|</span>
+        ${stat('Stat-Scheduled', 'Scheduled', s.scheduled)}<span class="ov-strip-sep">|</span>
+        ${stat('Stat-Completed', 'Completed', s.completed)}
+      </div>`).join('');
+    updateOvNav();
+  }
+
+  function updateOvNav() {
+    const el = $('ovStrips');
+    const overflow = el.scrollWidth > el.clientWidth + 1;
+    // Buttons always visible; disabled state greys them out when nothing to scroll.
+    $('ovPrev').disabled = !overflow || el.scrollLeft <= 0;
+    $('ovNext').disabled = !overflow || el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+  }
+
+  function updateTabCounts() {
+    $('tabCountAll').textContent = String(scheduledTasks().length);
+    $('tabCountMine').textContent = String(myScheduledTasks().length);
+    $('tabCountCompleted').textContent = String(completedTasks().length);
+  }
+
+  function setSummaryOpen(open) {
+    state.summaryOpen = !!open;
+    $('summaryPanel').classList.toggle('is-open', state.summaryOpen);
+    $('summaryToggle').setAttribute('aria-expanded', String(state.summaryOpen));
+    $('summaryToggle').setAttribute('aria-label', CONTENT[state.summaryOpen ? 'Summary-Collapse' : 'Summary-Expand'] || (state.summaryOpen ? 'Collapse overview' : 'Expand overview'));
+  }
+
+  function uniq(vals) { return [...new Set(vals.filter(Boolean))]; }
+  function fillSelect(sel, values) {
+    // keep the first ("All") option, replace the rest — but remember the
+    // user's current choice so a background sync/create/edit doesn't yank
+    // their filter back to "All".
+    const prev = sel.value;
+    sel.length = 1;
+    values.forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); });
+    if (prev && values.includes(prev)) sel.value = prev;
+  }
+  function buildFilterOptions() {
+    fillSelect($('fProject'),  uniq(state.tasks.map((t) => t.projectLabel)).sort());
+    fillSelect($('fStatus'),   uniq(state.tasks.map((t) => t.status)).sort());
+    fillSelect($('fPriority'), ['High', 'Medium', 'Low'].filter((p) => state.tasks.some((t) => t.priority === p)));
+  }
+  function fillProjectDropdown() {
+    const sel = $('nProject');
+    sel.innerHTML = '';
+    state.projects.forEach((p) => {
+      const o = document.createElement('option');
+      o.value = p.code; o.textContent = p.label; o.dataset.prefix = p.prefix || '';
+      sel.appendChild(o);
+    });
+  }
+
+  function visibleTasks() {
+    let list = state.tasks.slice();
+    if (state.tab === 'mine') list = list.filter((t) => isMyTask(t));
+    if (state.tab === 'completed') {
+      list = list.filter((t) => isCompletedTask(t));
+      const cf = $('fCompleted').value;
+      if (cf === 'approved') list = list.filter((t) => t.approved);
+      else if (cf === 'logged') list = list.filter((t) => t.logged && !t.approved);
+    } else {
+      list = list.filter((t) => !isCompletedTask(t));
+    }
+    const proj = $('fProject').value, st = $('fStatus').value, pri = $('fPriority').value;
+    const q = $('fSearch').value.trim().toLowerCase();
+    if (proj) list = list.filter((t) => t.projectLabel === proj);
+    if (st)   list = list.filter((t) => t.status === st);
+    if (pri)  list = list.filter((t) => t.priority === pri);
+    if (q)    list = list.filter((t) => (t.name + ' ' + (t.description || '')).toLowerCase().includes(q));
+    return list;
+  }
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  /** Live sheets store user-sheet keys in Assigned To (e.g. user-03). Prettify for display until API adds assigneeLabel. */
+  function assigneeLabel(raw) {
+    const v = String(raw || '').trim();
+    if (!v) return '';
+    const hit = v.match(/^user-0*(\d+)$/i);
+    return hit ? ('User ' + hit[1]) : v;
+  }
+
+  /** P2 list is already server-scoped to this user; P3+ "mine" matches display name or user-sheet key. */
+  function isMyTask(t) {
+    if (state.profile === 2) return true;
+    const key = String(t.assignedTo || '');
+    return key === state.displayName || key === state.username
+      || (state.displayName && key.toLowerCase() === state.displayName.toLowerCase());
+  }
+
+  function myScheduledTasks() {
+    return scheduledTasks().filter((t) => isMyTask(t));
+  }
+
+  /** Who may open the edit form (server still decides what saves). */
+  function canEditTask(t) {
+    if (!t || !t.id) return false;
+    if (state.profile >= 4 && state.canWrite) return true;
+    // Profile 3 (moderator): may open the form to approve/classify —
+    // openEdit locks every field except status.
+    if (state.profile === 3) return true;
+    // Profile 2: server already scoped the list to this user's tasks
+    if (state.profile === 2) return true;
+    return false;
+  }
+
+  function ensureStatusOption(sel, value) {
+    if (!value) return;
+    const hit = [...sel.options].some((o) => o.value === value);
+    if (!hit) {
+      const o = document.createElement('option');
+      o.value = value; o.textContent = value;
+      sel.appendChild(o);
+    }
+    sel.value = value;
+  }
+
+  function updateStatusDropdown(sel, isModOrAdmin) {
+    // The status vocabulary comes from the master content tab; the inline
+    // lists are only fallbacks if those sheet rows ever go missing.
+    const split = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
+    const all = split(CONTENT['Status-Options'] || 'Assigned,Ongoing,Paused,Rejected,Approved,Completed');
+    const userAllowed = split(CONTENT['Status-UserAllowed'] || 'Ongoing,Paused,Rejected,Completed');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    all.forEach((name) => {
+      const o = document.createElement('option');
+      o.value = o.textContent = name;
+      o.disabled = !(isModOrAdmin || userAllowed.includes(name));
+      sel.appendChild(o);
+    });
+    if (prev) sel.value = prev;
+  }
+
+  function openEdit(task) {
+    if (!canEditTask(task)) return;
+    state.editingId = task.id;
+    $('eId').value = task.id;
+    $('eProjectLabel').textContent = task.projectLabel || task.projectName || '—';
+    $('eName').value = task.name || '';
+    $('eDesc').value = task.description || '';
+    $('eNotes').value = task.notes || '';
+    $('ePriority').value = task.priority || 'Low'; // effective priority, computed by the middleware
+    $('ePriority').disabled = state.profile < 4; // only the admin can change priority
+    const isModOrAdmin = state.profile >= 3;
+    updateStatusDropdown($('eStatus'), isModOrAdmin);
+    ensureStatusOption($('eStatus'), task.status || 'Assigned');
+    // If user is not mod/admin and views an admin-only status, they cannot change it
+    if (!isModOrAdmin && (task.status === 'Assigned' || task.status === 'Approved')) {
+      $('eStatus').disabled = true;
+    } else {
+      $('eStatus').disabled = false;
+    }
+    // Moderator (P3): approve & classify only — every field except status locked
+    const modOnly = state.profile === 3;
+    ['eName', 'eDesc', 'eNotes', 'eDeadline'].forEach((id) => { $(id).disabled = modOnly; });
+    $('eDeadline').value = task.endDate || '';
+    $('eRevNote').value = '';
+    $('eRevNoteWrap').hidden = $('eStatus').value !== 'Revision';
+    $('editResult').textContent = '';
+    $('editResult').className = 'new-result';
+    $('editDlg').showModal();
+  }
+
+  // The revision-note field lives and dies with the Revision status choice.
+  $('eStatus').addEventListener('change', () => {
+    $('eRevNoteWrap').hidden = $('eStatus').value !== 'Revision';
+  });
+
+  function drawCards() {
+    const rows = visibleTasks();
+    const hideAssignee = (state.tab === 'mine');
+    const list = $('taskList');
+
+    list.innerHTML = rows.map((t) => {
+      const editable = canEditTask(t);
+      const tags = state.tab === 'completed'
+        ? `<span class="chip ${t.approved ? 'tag-approved' : 'tag-logged'}">${t.approved ? 'approved' : 'logged'}</span>` : '';
+      const calcPri = t.priority || 'Low'; // effective priority from the middleware
+      const isOverdue = !!t.overdue;
+      const priClass = isOverdue ? 'priority is-overdue' : 'priority';
+      // Dot symbol says who set the priority: ● clock/auto, ⭑ admin hand-set,
+      // ⬟ moderator hand-set (dormant — mods have no priority rights today).
+      const byMod = t.prioritySetBy === 'moderator';
+      const dotGlyph = t.prioritySource === 'override' ? (byMod ? '⬟' : '⭑') : '●';
+      const dotKind = t.prioritySource === 'override' ? (byMod ? ' dot-mod' : ' dot-admin') : '';
+      const pri = calcPri ? `<span class="${priClass} pri-${esc(calcPri)}"><span class="priority-dot${dotKind}">${dotGlyph}</span>${esc(calcPri)}</span>` : '';
+      const statusClass = t.status ? `status-${esc(String(t.status).toLowerCase().replace(/\s+/g, ''))}` : '';
+      // Approval model: 'Completed' = waiting for approval (grey pill);
+      // 'Approved' wears the green and reads "Completed" to everyone.
+      const statusLabel = t.status === 'Approved' ? 'Completed' : (t.status || '—');
+      const assignee = (!hideAssignee && t.assignedTo)
+        ? `<span class="assignee-pill"><span class="assignee-pill__name">${esc(assigneeLabel(t.assignedTo))}</span><span class="assignee-pill__status ${statusClass}">${esc(statusLabel)}</span></span>`
+        : (t.status ? `<span class="chip st-${esc(String(t.status).replace(/\s+/g, ''))}">${esc(statusLabel)}</span>` : '');
+      const deadline = t.endDate
+        ? `<span class="deadline-inline">${CONTENT['ClockIcon'] || ''}${esc(t.endDate)}</span>` : '';
+      const editBtn = editable
+        ? `<div class="task-card-actions"><button type="button" class="btn ghost edit-task-btn" data-task-id="${esc(t.id)}">${esc(CONTENT['Edit-Open'] || 'Edit')}</button></div>`
+        : '';
+      return `<article class="task-card${editable ? ' is-editable' : ''}" data-task-id="${esc(t.id || '')}" ${editable ? 'tabindex="0" role="button"' : ''}>
+        <div class="task-row">${pri}${assignee}${tags}</div>
+        <div class="task-row task-row--title">
+          <span class="task-project">${esc(t.projectLabel)}</span>
+          <span class="task-inline-divider">|</span>
+          <span class="task-title">${esc(t.name)}</span>
+          ${deadline ? `<span class="task-inline-divider">|</span>${deadline}` : ''}
+        </div>
+        ${t.description ? `<p class="task-desc">${esc(t.description)}</p>` : ''}
+        ${t.notes ? `<p class="task-note">${esc(t.notes)}</p>` : ''}
+        ${editBtn}
+      </article>`;
+    }).join('');
+
+    $('emptyRow').style.display = rows.length ? 'none' : 'block';
+    $('emptyRow').textContent = (state.tab === 'completed' ? CONTENT['Empty-Completed'] : CONTENT['Empty-Tasks']) || 'No tasks to show.';
+    updateSummary();
+    updateTabCounts();
+  }
+
+  function selectTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    document.body.classList.toggle('tab-completed', tab === 'completed');
+    drawCards();
+  }
+
+  // ===== EVENTS ==========================================================
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('.tab'); if (b) selectTab(b.dataset.tab);
+  });
+  ['fProject', 'fStatus', 'fPriority', 'fCompleted'].forEach((id) => $(id).addEventListener('change', drawCards));
+  $('fSearch').addEventListener('input', drawCards);
+  $('syncButton').addEventListener('click', triggerSync);
+  $('summaryToggle').addEventListener('click', () => setSummaryOpen(!state.summaryOpen));
+  // Overview strip nav: scroll one viewport per click; arrows grey out at the ends.
+  $('ovPrev').addEventListener('click', () => { const el = $('ovStrips'); el.scrollBy({ left: -el.clientWidth, behavior: 'smooth' }); });
+  $('ovNext').addEventListener('click', () => { const el = $('ovStrips'); el.scrollBy({ left: el.clientWidth, behavior: 'smooth' }); });
+  $('ovStrips').addEventListener('scroll', updateOvNav);
+  window.addEventListener('resize', updateOvNav);
+  setSummaryOpen(false);
+
+  // login / logout — sign-in/out controls live in the shared topbar
+  // (middleware/shared/topbar.js); it dispatches 'topbar:signin-click' and
+  // handles sign-out itself. This page only owns the login dialog contents.
+  const dlg = $('loginDlg');
+  document.addEventListener('topbar:signin-click', () => { $('loginErr').textContent = ''; dlg.showModal(); });
+  $('loginCancel').addEventListener('click', () => dlg.close());
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const r = await postJson('/api/login', { username: $('lu').value, password: $('lp').value });
+    if (!r.ok) { $('loginErr').textContent = 'Wrong username or password.'; return; }
+    dlg.close();
+    if (window.topbarRefresh) window.topbarRefresh();
+    await refreshSession();
+  });
+
+  // new task: dropdown selection prefills the name with the edition's pseudo prefix
+  const newDlg = $('newDlg');
+  $('newTaskBtn').addEventListener('click', () => {
+    $('newResult').textContent = ''; $('newResult').className = 'new-result';
+    fillProjectDropdown(); applyPrefill(); newDlg.showModal();
+  });
+  $('newCancel').addEventListener('click', () => newDlg.close());
+  function applyPrefill() {
+    const opt = $('nProject').selectedOptions[0]; if (!opt) return;
+    const prefix = opt.dataset.prefix || '';
+    // only replace when the field is empty or still holds a previous prefix
+    if (!$('nName').value || /\s-\s?$/.test($('nName').value)) $('nName').value = prefix;
+  }
+  $('nProject').addEventListener('change', applyPrefill);
+  $('newForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = $('newResult');
+    const submit = $('newForm').querySelector('button[type="submit"]');
+    submit.disabled = true;
+    const r = await postJson('/api/tasks', {
+      projectCode: $('nProject').value, name: $('nName').value.trim(),
+      description: $('nDesc').value.trim(), notes: $('nNotes').value.trim(),
+      priority: $('nPriority').value, deadline: $('nDeadline').value.trim(),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      out.className = 'new-result ok';
+      out.textContent = d.message || 'Task created.';
+      $('newForm').reset();
+      await loadBoard();
+      newDlg.close();
+    } else {
+      out.className = 'new-result bad';
+      out.textContent = d.error || 'Could not create task.';
+      submit.disabled = false;
+    }
+  });
+
+  // edit task — UI ready; waits for Claude's PATCH /api/tasks/:id
+  const editDlg = $('editDlg');
+  $('editCancel').addEventListener('click', () => { state.editingId = null; editDlg.close(); });
+  $('taskList').addEventListener('click', (e) => {
+    const btn = e.target.closest('.edit-task-btn');
+    const card = e.target.closest('.task-card.is-editable');
+    const id = (btn && btn.dataset.taskId) || (card && card.dataset.taskId);
+    if (!id) return;
+    e.preventDefault();
+    const task = state.tasks.find((t) => t.id === id);
+    if (task) openEdit(task);
+  });
+  $('taskList').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('.task-card.is-editable');
+    if (!card || !card.dataset.taskId) return;
+    e.preventDefault();
+    const task = state.tasks.find((t) => t.id === card.dataset.taskId);
+    if (task) openEdit(task);
+  });
+  $('editForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = $('editResult');
+    const submit = $('editForm').querySelector('button[type="submit"]');
+    const id = $('eId').value;
+    // Locked (disabled) fields are not the caller's to change — leave them
+    // out of the request entirely; the server rejects what it must anyway.
+    const body = {};
+    if (!$('eName').disabled) body.name = $('eName').value.trim();
+    if (!$('eDesc').disabled) body.description = $('eDesc').value.trim();
+    if (!$('eNotes').disabled) body.notes = $('eNotes').value.trim();
+    if (!$('ePriority').disabled) body.priority = $('ePriority').value;
+    if (!$('eStatus').disabled) body.status = $('eStatus').value;
+    if (!$('eDeadline').disabled) body.deadline = $('eDeadline').value.trim();
+    if (body.name !== undefined && !body.name) {
+      out.className = 'new-result bad';
+      out.textContent = 'Task name is required.';
+      return;
+    }
+    // Sending back for revision demands a reason (server refuses without it).
+    if (body.status === 'Revision') {
+      body.revisionNote = $('eRevNote').value.trim();
+      if (!body.revisionNote) {
+        out.className = 'new-result bad';
+        out.textContent = 'A revision note is required — say why the task is going back.';
+        return;
+      }
+    }
+    submit.disabled = true;
+    out.className = 'new-result';
+    out.textContent = 'Saving…';
+    try {
+      const r = await patchJson('/api/tasks/' + encodeURIComponent(id), body);
+      let d = {};
+      try { d = await r.json(); } catch (err) { d = {}; }
+      if (!r.ok) {
+        out.className = 'new-result bad';
+        out.textContent = d.error || (r.status === 404 ? 'Task not found.' : 'Could not save changes.');
+        submit.disabled = false;
+        return;
+      }
+      if (d.ok) {
+        out.className = 'new-result ok';
+        out.textContent = d.message || 'Task updated.';
+        state.editingId = null;
+        await loadBoard();
+        editDlg.close();
+      } else {
+        out.className = 'new-result bad';
+        out.textContent = d.error || 'Could not save changes.';
+        submit.disabled = false;
+      }
+    } catch (err) {
+      out.className = 'new-result bad';
+      out.textContent = 'Could not reach the server.';
+      submit.disabled = false;
+    }
+  });
+
+  render();
+  refreshSession();
+</script>
+
+<!-- ===== DEV GUIDE behaviour (purge at go-live) =========================
+     Wires the header toggle to the outline/label overlay; remembers the
+     choice across reloads. Self-contained: delete this whole block to remove. -->
+<script>
+  (function () {
+    var toggle = document.getElementById('guideToggle');
+    if (!toggle) return;
+    var on = localStorage.getItem('ts2_guide') === '1';
+    toggle.checked = on;
+    document.body.classList.toggle('guide-on', on);
+    toggle.addEventListener('change', function () {
+      document.body.classList.toggle('guide-on', toggle.checked);
+      localStorage.setItem('ts2_guide', toggle.checked ? '1' : '0');
+    });
+  })();
+</script>
+
+<!-- ===== DEV live-reload (purge at go-live) =============================
+     Subscribes to the middleware's change stream and refreshes the page
+     whenever a watched file changes. Only works when served by our server
+     (localhost:4300); silently no-ops elsewhere. Delete this whole block
+     to remove. -->
+<script>
+  (function () {
+    if (!window.EventSource) return;
+    try {
+      var es = new EventSource('/api/livereload');
+      es.onmessage = function () { location.reload(); };
+    } catch (e) { /* not served by our middleware — ignore */ }
+  })();
 </script>
 </body>
 </html>
