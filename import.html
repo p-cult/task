@@ -302,14 +302,13 @@
           projectSelect.appendChild(opt);
         });
 
-        // Populate assignees from users
-        // Parse the log/activity data to find unique user names, or use a hardcoded list
-        // For now, we'll fetch from a users endpoint (if it exists) or use common names
-        const commonUsers = ['harshit', 'aishwarya', 'ashwin', 'admin'];
-        commonUsers.forEach((user) => {
+        // Populate assignees from the real accounts the server returns.
+        // value = user-sheet key (e.g. "user-03"), which is what the import
+        // API expects; the label is the person's name.
+        (data.users || []).forEach((u) => {
           const opt = document.createElement('option');
-          opt.value = user;
-          opt.textContent = user;
+          opt.value = u.userSheet;
+          opt.textContent = u.name;
           assigneeSelect.appendChild(opt);
         });
       } catch (e) {
