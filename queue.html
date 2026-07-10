@@ -1,0 +1,166 @@
+<!doctype html><html lang="en"><head>
+<script>
+(function () {
+  var API_ORIGIN = "https://param-task-middleware.onrender.com";
+  var _fetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    init = init || {};
+    var url = typeof input === 'string' ? input : (input && input.url);
+    if (url && url.charAt(0) === '/') { url = API_ORIGIN + url; }
+    // Always send the cross-site session cookie (override any 'same-origin').
+    init.credentials = 'include';
+    var p = _fetch(url, init);
+    // Mirror the CSRF token from the session response into a first-party
+    // cookie so csrfToken()/csrf() (which read document.cookie) work cross-site.
+    if (url && url.indexOf('/api/session') >= 0) {
+      p.then(function (res) {
+        res.clone().json().then(function (d) {
+          if (d && d.csrfToken) {
+            document.cookie = 'ts2_csrf=' + d.csrfToken + '; Path=/; SameSite=Lax';
+          }
+        }).catch(function () {});
+      }).catch(function () {});
+    }
+    return p;
+  };
+  // Disable the dev-only live-reload stream (cross-origin, not needed live).
+  window.EventSource = function () {
+    return { close: function () {}, addEventListener: function () {}, set onmessage(v) {}, set onerror(v) {} };
+  };
+})();
+</script><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin · Task Queue — Param Culture</title>
+<style>
+  :root{--bg:#f7f4ee;--surface:#fffdf8;--ink:#25221d;--soft:#6f675c;--accent:#4f7a3a;--accentink:#fff;
+        --line:#ded5c8;--radius:8px;--danger:#a04b3c;--warn:#9c7c3c;
+        --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);padding:28px 20px 80px}
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--soft);font-size:14px;margin:0 0 22px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+  button{font-family:var(--font);border:1px solid var(--line);border-radius:var(--radius);
+         padding:9px 16px;font-size:14px;background:var(--surface);cursor:pointer}
+  button.primary{background:var(--accent);color:var(--accentink);border-color:var(--accent);font-weight:600}
+  button:disabled{opacity:.45;cursor:default}
+  .count{font-size:13px;color:var(--soft)}
+  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);
+        border-radius:12px;overflow:hidden;font-size:14px}
+  th,td{padding:10px 12px;text-align:left;border-top:1px solid var(--line);vertical-align:top}
+  thead th{background:#f0ebe2;border-top:0;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--soft)}
+  .task{font-weight:600}
+  .meta{color:var(--soft);font-size:12px;margin-top:2px}
+  select{font-family:var(--font);padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:13px}
+  select.silly{border-color:var(--warn)} select.reject{border-color:var(--danger)}
+  .empty{padding:48px;text-align:center;color:var(--soft);background:var(--surface);
+         border:1px dashed var(--line);border-radius:12px}
+  #msg{margin:14px 0;font-size:14px;min-height:20px}
+  #msg.err{color:var(--danger)} #msg.ok{color:var(--accent)}
+  .pill{display:inline-block;background:#f0ebe2;border-radius:20px;padding:2px 10px;font-size:12px;margin-left:6px}
+  a.back{color:var(--soft);font-size:13px;text-decoration:none}
+</style></head><body><div class="wrap">
+  <a class="back" href="admin.html">&larr; Admin</a>
+  <h1>Task Queue</h1>
+  <p class="sub">Every new task waits here until you decide it. <b>real</b> = normal task ·
+     <b>routine</b> = logged but never counted as completed · <b>silly</b> = filed to the
+     person's "my notes", never on the board · <b>reject</b> = dropped.</p>
+  <div class="bar">
+    <button id="refresh">Refresh</button>
+    <button id="push" class="primary" disabled>Push decisions</button>
+    <span class="count" id="count"></span>
+  </div>
+  <div id="msg"></div>
+  <div id="list"></div>
+</div>
+<script>
+'use strict';
+let items = [];
+const $ = (s) => document.querySelector(s);
+
+function csrf() {
+  const m = document.cookie.match(/(?:^|; )ts2_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+function render() {
+  const list = $('#list');
+  $('#count').textContent = items.length ? items.length + ' waiting' : '';
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">Queue is empty — nothing waiting for approval.</div>';
+    $('#push').disabled = true;
+    return;
+  }
+  let html = '<table><thead><tr><th>From</th><th>Task</th><th style="width:130px">Decision</th></tr></thead><tbody>';
+  items.forEach((it, i) => {
+    html += '<tr><td>' + esc(it.reporter || '?') +
+      '<div class="meta">' + esc(it.reportDate || '') + (it.origin === 'user' ? '<span class="pill">typed by user</span>' : '<span class="pill">whatsapp</span>') + '</div></td>' +
+      '<td><div class="task">' + esc(it.name) + '</div>' +
+      '<div class="meta">' + esc(it.project || '') + ' · ' + esc(it.status || 'open') + '</div></td>' +
+      '<td><select data-i="' + i + '">' +
+      '<option value="">— decide —</option>' +
+      '<option value="real">real task</option>' +
+      '<option value="routine">routine</option>' +
+      '<option value="silly">silly → my notes</option>' +
+      '<option value="reject">reject</option>' +
+      '</select></td></tr>';
+  });
+  html += '</tbody></table>';
+  list.innerHTML = html;
+  list.querySelectorAll('select').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      sel.className = sel.value === 'silly' ? 'silly' : sel.value === 'reject' ? 'reject' : '';
+      $('#push').disabled = !anyDecided();
+    });
+  });
+  $('#push').disabled = true;
+}
+
+function anyDecided() {
+  return Array.from(document.querySelectorAll('#list select')).some((s) => s.value);
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+
+async function load() {
+  $('#msg').textContent = 'Loading…'; $('#msg').className = '';
+  try {
+    const r = await fetch('/api/admin/queue', { credentials: 'same-origin' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'load failed');
+    items = d.items || [];
+    $('#msg').textContent = '';
+    render();
+  } catch (e) {
+    $('#msg').textContent = 'Could not load the queue: ' + e.message; $('#msg').className = 'err';
+  }
+}
+
+async function push() {
+  const decisions = [];
+  document.querySelectorAll('#list select').forEach((sel) => {
+    if (sel.value) decisions.push({ row: items[Number(sel.dataset.i)].row, tag: sel.value });
+  });
+  if (!decisions.length) return;
+  $('#push').disabled = true;
+  $('#msg').textContent = 'Pushing ' + decisions.length + ' decision(s)…'; $('#msg').className = '';
+  try {
+    const r = await fetch('/api/admin/queue/decide', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+      body: JSON.stringify({ decisions }),
+    });
+    const d = await r.json();
+    $('#msg').textContent = d.message || (d.ok ? 'Done.' : 'Some decisions failed.');
+    $('#msg').className = d.ok ? 'ok' : 'err';
+    await load();
+  } catch (e) {
+    $('#msg').textContent = 'Push failed: ' + e.message; $('#msg').className = 'err';
+    $('#push').disabled = false;
+  }
+}
+
+$('#refresh').addEventListener('click', load);
+$('#push').addEventListener('click', push);
+load();
+</script></body></html>

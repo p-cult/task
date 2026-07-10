@@ -9,10 +9,11 @@
     init = init || {};
     var url = typeof input === 'string' ? input : (input && input.url);
     if (url && url.charAt(0) === '/') { url = API_ORIGIN + url; }
-    if (init.credentials === undefined) { init.credentials = 'include'; }
+    // Always send the cross-site session cookie (override any 'same-origin').
+    init.credentials = 'include';
     var p = _fetch(url, init);
     // Mirror the CSRF token from the session response into a first-party
-    // cookie so csrfToken() (which reads document.cookie) works cross-site.
+    // cookie so csrfToken()/csrf() (which read document.cookie) work cross-site.
     if (url && url.indexOf('/api/session') >= 0) {
       p.then(function (res) {
         res.clone().json().then(function (d) {
@@ -680,7 +681,7 @@
       </button>
     </div>
     <!-- Admin button aligned with sync tools -->
-    <a class="admin-button" id="adminLinkHeader" href="/admin" data-comp="AdminButtonHeader" data-min-profile-inline="4" style="display:none" title="Admin reports">
+    <a class="admin-button" id="adminLinkHeader" href="admin.html" data-comp="AdminButtonHeader" data-min-profile-inline="4" style="display:none" title="Admin reports">
       <span data-content-html="AdminIcon" style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"></span>
     </a>
   </div>
