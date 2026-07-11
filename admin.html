@@ -453,6 +453,7 @@
       <label class="dz-info">Type <b>RESET</b> to enable the wipe:</label>
       <input id="resetPhrase" type="text" autocomplete="off" placeholder="RESET">
       <button class="btn danger" id="btnResetGo" disabled>Wipe all tasks</button>
+      <button class="btn" id="btnResetCancel">Cancel</button>
     </div>
     <div id="resetResult" class="dz-info"></div>
   </section>
@@ -777,6 +778,21 @@ load();
 (function () {
   const info = $('resetInfo'), confirmRow = $('resetConfirm'), phrase = $('resetPhrase');
   const goBtn = $('btnResetGo'), previewBtn = $('btnResetPreview'), result = $('resetResult');
+  const cancelBtn = $('btnResetCancel');
+
+  // Back out of the reset without doing anything.
+  function cancelReset() {
+    confirmRow.style.display = 'none';
+    phrase.value = '';
+    goBtn.disabled = true;
+    info.textContent = '';
+    result.textContent = '';
+  }
+  cancelBtn.addEventListener('click', cancelReset);
+  // Esc also cancels while the confirm row is open.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && confirmRow.style.display !== 'none') cancelReset();
+  });
 
   previewBtn.addEventListener('click', async () => {
     info.textContent = 'Checking…';
