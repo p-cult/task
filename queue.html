@@ -156,14 +156,14 @@
 </style></head><body>
 <div id="topbar-mount"></div>
 <div class="wrap">
-  <a class="back" href="admin.html">&larr; Admin</a>
-  <h1>Task Queue</h1>
+  <a class="back" href="admin.html" data-content="Queue-Back">&larr; Admin</a>
+  <h1 data-content="Queue-Title">Task Queue</h1>
   <p class="sub">Every new task waits here until you decide it. <b>real</b> = normal task ·
      <b>routine</b> = logged but never counted as completed · <b>silly</b> = filed to the
      person's "my notes", never on the board · <b>reject</b> = dropped.</p>
   <div class="bar">
-    <button id="refresh">Refresh</button>
-    <button id="push" class="primary" disabled>Push decisions</button>
+    <button id="refresh" data-content="Queue-Refresh">Refresh</button>
+    <button id="push" class="primary" disabled data-content="Queue-Push">Push decisions</button>
     <span class="count" id="count"></span>
   </div>
   <div id="msg"></div>
@@ -238,6 +238,22 @@
 'use strict';
 // Sign in lives on the dashboard; send the user there (returns via Admin link).
 document.addEventListener('topbar:signin-click', function () { window.location.href = 'index.html'; });
+
+// Page copy comes from the master content tab (data-content / data-content-ph);
+// the hardcoded text is the fallback until a key is filled in the sheet.
+(function () {
+  fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
+    var c = (d && d.content) || {};
+    document.querySelectorAll('[data-content]').forEach(function (el) {
+      var v = c[el.getAttribute('data-content')];
+      if (v != null && v !== '') el.textContent = v;
+    });
+    document.querySelectorAll('[data-content-ph]').forEach(function (el) {
+      var v = c[el.getAttribute('data-content-ph')];
+      if (v != null && v !== '') el.placeholder = v;
+    });
+  }).catch(function () {});
+})();
 let items = [];
 const $ = (s) => document.querySelector(s);
 

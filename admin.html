@@ -363,8 +363,8 @@
        — same classes the board page uses, so both headers compute the same
        height at every viewport width. -->
   <div class="brand-copy">
-    <h1>Admin · Reports</h1>
-    <p class="subtitle">Param Culture — task activity &amp; reports</p>
+    <h1 data-content="Admin-Title">Admin · Reports</h1>
+    <p class="subtitle" data-content="Admin-Sub">Param Culture — task activity &amp; reports</p>
   </div>
   <span class="spacer"></span>
   <span class="who" id="who"></span>
@@ -382,12 +382,12 @@
   <section class="panel no-print">
     <div class="controls">
       <div class="seg" id="viewSeg">
-        <button data-view="tasks" class="on">Tasks</button>
-        <button data-view="log">Activity log</button>
+        <button data-view="tasks" class="on" data-content="Admin-ViewTasks">Tasks</button>
+        <button data-view="log" data-content="Admin-ViewLog">Activity log</button>
       </div>
 
       <div class="field">
-        <label for="groupBy">Group by</label>
+        <label for="groupBy" data-content="Admin-GroupBy">Group by</label>
         <select id="groupBy">
           <option value="project">Project</option>
           <option value="user">User</option>
@@ -400,7 +400,7 @@
       </div>
 
       <div class="field">
-        <label for="period">Period</label>
+        <label for="period" data-content="Admin-Period">Period</label>
         <select id="period">
           <option value="all">All time</option>
           <option value="week">This week</option>
@@ -410,30 +410,30 @@
       </div>
 
       <div class="field" data-only="tasks">
-        <label for="fProject">Project</label>
+        <label for="fProject" data-content="Admin-Project">Project</label>
         <select id="fProject"><option value="">All</option></select>
       </div>
       <div class="field" data-only="tasks">
-        <label for="fUser">User</label>
+        <label for="fUser" data-content="Admin-User">User</label>
         <select id="fUser"><option value="">All</option></select>
       </div>
       <div class="field" data-only="tasks">
-        <label for="fStatus">Status</label>
+        <label for="fStatus" data-content="Admin-Status">Status</label>
         <select id="fStatus"><option value="">All</option></select>
       </div>
       <div class="field" data-only="tasks">
-        <label for="fPriority">Priority</label>
+        <label for="fPriority" data-content="Admin-Priority">Priority</label>
         <select id="fPriority"><option value="">All</option></select>
       </div>
 
       <div class="field">
-        <label for="q">Search</label>
-        <input type="search" id="q" placeholder="name, id, user…">
+        <label for="q" data-content="Admin-Search">Search</label>
+        <input type="search" id="q" data-content-ph="Admin-SearchPh" placeholder="name, id, user…">
       </div>
 
       <div class="exports">
-        <button class="btn primary" id="btnPrint">🖨 Print / PDF</button>
-        <button class="btn" data-fmt="md" title="Text report — headings + tables, human-readable and parser-friendly (Markdown)">Report</button>
+        <button class="btn primary" id="btnPrint" data-content="Admin-Print">🖨 Print / PDF</button>
+        <button class="btn" data-fmt="md" title="Text report — headings + tables, human-readable and parser-friendly (Markdown)" data-content="Admin-Report">Report</button>
         <button class="btn" data-fmt="csv">CSV</button>
         <button class="btn" data-fmt="tsv">TSV</button>
         <button class="btn" data-fmt="json">JSON</button>
@@ -450,17 +450,17 @@
   </section>
 
   <section class="panel no-print danger-zone" style="display:none">
-    <h2 class="dz-title">⚠ Reset all tasks</h2>
-    <p class="dz-note">Permanently clears every task from the master board, the task↔sheet mapping, and all user sheets — the once-only switch from test data to real use. Projects, people, logins, content, icons and settings are all kept. This cannot be undone.</p>
+    <h2 class="dz-title" data-content="Admin-ResetTitle">⚠ Reset all tasks</h2>
+    <p class="dz-note" data-content="Admin-ResetNote">Permanently clears every task from the master board, the task↔sheet mapping, and all user sheets — the once-only switch from test data to real use. Projects, people, logins, content, icons and settings are all kept. This cannot be undone.</p>
     <div class="dz-actions">
-      <button class="btn" id="btnResetPreview">Preview what will be cleared</button>
+      <button class="btn" id="btnResetPreview" data-content="Admin-ResetPreview">Preview what will be cleared</button>
       <span id="resetInfo" class="dz-info"></span>
     </div>
     <div id="resetConfirm" class="dz-confirm" style="display:none">
       <label class="dz-info">Type <b>RESET</b> to enable the wipe:</label>
       <input id="resetPhrase" type="text" autocomplete="off" placeholder="RESET">
-      <button class="btn danger" id="btnResetGo" disabled>Wipe all tasks</button>
-      <button class="btn" id="btnResetCancel">Cancel</button>
+      <button class="btn danger" id="btnResetGo" disabled data-content="Admin-ResetWipe">Wipe all tasks</button>
+      <button class="btn" id="btnResetCancel" data-content="Admin-ResetCancel">Cancel</button>
     </div>
     <div id="resetResult" class="dz-info"></div>
   </section>
@@ -777,6 +777,22 @@ $('btnPrint').addEventListener('click', () => window.print());
 // The shared topbar's "Sign in" only fires an event; login lives on the
 // dashboard, so send the user there (they return via the Admin button).
 document.addEventListener('topbar:signin-click', () => { window.location.href = 'index.html'; });
+
+// Page copy comes from the master content tab (data-content / data-content-ph);
+// the hardcoded text is the fallback until a key is filled in the sheet.
+(function () {
+  fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
+    var c = (d && d.content) || {};
+    document.querySelectorAll('[data-content]').forEach(function (el) {
+      var v = c[el.getAttribute('data-content')];
+      if (v != null && v !== '') el.textContent = v;
+    });
+    document.querySelectorAll('[data-content-ph]').forEach(function (el) {
+      var v = c[el.getAttribute('data-content-ph')];
+      if (v != null && v !== '') el.placeholder = v;
+    });
+  }).catch(function () {});
+})();
 document.querySelectorAll('[data-fmt]').forEach((b) => b.addEventListener('click', () => {
   const f = b.dataset.fmt;
   if (f === 'csv') exportDelimited(',', 'csv', 'text/csv');
