@@ -4,26 +4,37 @@
 <script>
 (function () {
   var API_ORIGIN = "https://param-task-middleware.onrender.com";
+  var TOKEN_KEY = 'ts2_token';
+  function getToken() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } }
+  function setToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} }
+  function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
   var _fetch = window.fetch.bind(window);
-  window.fetch = function (input, init) {
+  window.fetch = async function (input, init) {
     init = init || {};
     var url = typeof input === 'string' ? input : (input && input.url);
     if (url && url.charAt(0) === '/') { url = API_ORIGIN + url; }
-    // Always send the cross-site session cookie (override any 'same-origin').
+    // Cookie fallback (same-origin / defense in depth).
     init.credentials = 'include';
-    var p = _fetch(url, init);
-    // Mirror the CSRF token from the session response into a first-party
-    // cookie so csrfToken()/csrf() (which read document.cookie) work cross-site.
+    // Primary auth: send the stored session token as a Bearer header. This
+    // works with NO cross-site cookie, so login survives strict third-party-
+    // cookie browsers.
+    var tok = getToken();
+    if (tok) { init.headers = Object.assign({}, init.headers, { Authorization: 'Bearer ' + tok }); }
+    var res = await _fetch(url, init);
+    // Capture the token from the login response header BEFORE returning, so it
+    // is stored before the caller fires its first authed request (no race).
+    if (url && url.indexOf('/api/login') >= 0) {
+      var t = res.headers.get('X-Session-Token');
+      if (t) setToken(t);
+    }
+    if (url && url.indexOf('/api/logout') >= 0) { clearToken(); }
+    // Keep mirroring the CSRF token (cookie-auth fallback still uses it).
     if (url && url.indexOf('/api/session') >= 0) {
-      p.then(function (res) {
-        res.clone().json().then(function (d) {
-          if (d && d.csrfToken) {
-            document.cookie = 'ts2_csrf=' + d.csrfToken + '; Path=/; SameSite=Lax';
-          }
-        }).catch(function () {});
+      res.clone().json().then(function (d) {
+        if (d && d.csrfToken) { document.cookie = 'ts2_csrf=' + d.csrfToken + '; Path=/; SameSite=Lax'; }
       }).catch(function () {});
     }
-    return p;
+    return res;
   };
   // Disable the dev-only live-reload stream (cross-origin, not needed live).
   window.EventSource = function () {
