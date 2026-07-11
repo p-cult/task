@@ -442,7 +442,7 @@
     <div id="report"><div class="empty">Loading…</div></div>
   </section>
 
-  <section class="panel no-print danger-zone">
+  <section class="panel no-print danger-zone" style="display:none">
     <h2 class="dz-title">⚠ Reset all tasks</h2>
     <p class="dz-note">Permanently clears every task from the master board, the task↔sheet mapping, and all user sheets — the once-only switch from test data to real use. Projects, people, logins, content, icons and settings are all kept. This cannot be undone.</p>
     <div class="dz-actions">
@@ -493,9 +493,10 @@ async function load() {
   if (!d.ok) {
     $('report').innerHTML = '<div class="empty">This page is for signed-in admins.<br><br>'
       + '<a class="btn primary" href="index.html">Go to sign in &rarr;</a></div>';
-    const dz = document.querySelector('.danger-zone'); if (dz) dz.style.display = 'none';
-    return;
+    return; // danger zone stays hidden (default) for non-admins
   }
+  // Confirmed admin: reveal the reset danger zone.
+  const dz = document.querySelector('.danger-zone'); if (dz) dz.style.display = '';
   state.data = d;
   state.meta = d;
   $('who').textContent = d.admin + (d.stale ? ' · data may be stale' : '');
