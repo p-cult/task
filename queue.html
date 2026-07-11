@@ -43,11 +43,94 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Admin · Task Queue — Param Culture</title>
 <style>
-  :root{--bg:#f7f4ee;--surface:#fffdf8;--ink:#25221d;--soft:#6f675c;--accent:#4f7a3a;--accentink:#fff;
-        --line:#ded5c8;--radius:8px;--danger:#a04b3c;--warn:#9c7c3c;
-        --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);padding:28px 20px 80px}
-  .wrap{max-width:980px;margin:0 auto}
+/* Shared SKIN tokens — ONE file, the single source of truth for the whole
+   product's look. Loaded by BOTH the board (frontend/index.html) and the admin
+   page (middleware/admin/admin.html) via <link>, BEFORE topbar.css/chrome.css.
+
+   To reskin the entire app, change only the values here. Neither page keeps its
+   own copy of these tokens any more — that duplication is exactly what let the
+   two pages drift apart before (and once silently replaced "TASK SHEET" with
+   "PARAM"). Edit here only; do not re-add a :root token block to either page.
+
+   Light look only — dark mode intentionally not used. */
+:root {
+  --skin-bg:        #f7f4ee;
+  --skin-surface:   #fffdf8;
+  --skin-surface-strong: #f0ebe2;
+  --skin-ink:       #25221d;
+  --skin-ink-soft:  #6f675c;
+  --skin-accent:    #4f7a3a;
+  --skin-accent-ink:#ffffff;
+  --skin-line:      #ded5c8;
+  --skin-radius:    8px;
+  --skin-gap:       20px;
+  --skin-font:      ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --skin-shadow:    0 16px 42px rgba(32, 28, 22, 0.08);
+  --skin-pill-h:    27px; /* 20% shorter */
+  --pri-high:       #a63d4f;
+  --pri-medium:     #c99b25;
+  --pri-low:        #2f6f9f;
+  /* Task status colors */
+  --stat-assigned:  #4f7a3a;  /* medium sap green */
+  --stat-ongoing:   #c99b25;  /* medium chrome yellow */
+  --stat-paused:    #808080;  /* 30% grey */
+  --stat-rejected:  #d97766;  /* medium pastel brick red */
+  --stat-approved:  #4f7a3a;  /* medium sap green — shown as "Completed" */
+  --stat-completed: #9a9a9a;  /* grey: done, WAITING for approval */
+  --stat-revision:  #c99b25;  /* chrome yellow: sent back, work resumes */
+  --stat-cancelled: #55504a;  /* dark warm grey: closed without approval */
+}
+
+</style>
+<style>
+/* Shared topbar — ONE file, loaded by both the board (frontend/index.html)
+   and the admin page (middleware/admin/admin.html). Page-agnostic: it only
+   assumes the skin CSS variables (--skin-*) are already defined by the page
+   that includes it. Edit here only — do not fork a copy into either page. */
+.topbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 25px;
+  padding: 0 var(--skin-gap); background: var(--skin-surface); border-bottom: 0;
+  font-size: 12px; color: var(--skin-ink-soft); position: sticky; top: 0; z-index: 6;
+}
+.topbar-items { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+
+.topbar .devguide { margin: 0; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 20px; }
+.topbar .devguide input {
+  width: 14px; height: 14px; cursor: pointer; margin: 0 2px 0 0; accent-color: var(--skin-accent);
+  opacity: 1; pointer-events: auto; visibility: visible;
+  flex-shrink: 0;
+}
+.topbar .devguide .lbl { cursor: pointer; margin: 0; padding-left: 18px; font-size: 12px; color: var(--skin-ink-soft); }
+
+.topbar .user-tools { display: flex; gap: 8px; align-items: center; }
+.topbar .user-pill {
+  background: none; border: none; padding: 0; display: flex; align-items: center; gap: 4px;
+  color: var(--skin-ink-soft); font-size: 12px; height: auto;
+}
+.topbar .user-pill svg { width: 14px; height: 14px; fill: currentColor; }
+.topbar .user-pill-role { font-weight: 400; }
+.topbar .signout-button {
+  background: none; border: none; padding: 0; height: auto; width: auto; color: var(--skin-accent);
+  cursor: pointer; font-size: 12px; font-weight: 600; text-decoration: underline; font-family: inherit;
+}
+.topbar .signout-button:hover { opacity: 0.7; }
+.topbar .signin-link {
+  background: none; border: none; padding: 0; height: auto; width: auto; color: var(--skin-accent);
+  cursor: pointer; font-size: 12px; font-weight: 600; text-decoration: underline; font-family: inherit;
+}
+.topbar .signin-link:hover { opacity: 0.7; }
+
+</style>
+<style>
+  /* Colours come from the shared skin (middleware/shared/skin.css) so a reskin
+     propagates here too — these aliases just map this page's local names onto
+     the shared --skin-* tokens. --danger/--warn are queue-only accents. */
+  :root{--bg:var(--skin-bg);--surface:var(--skin-surface);--ink:var(--skin-ink);
+        --soft:var(--skin-ink-soft);--accent:var(--skin-accent);--accentink:var(--skin-accent-ink);
+        --line:var(--skin-line);--radius:var(--skin-radius);--font:var(--skin-font);
+        --danger:#a04b3c;--warn:#9c7c3c}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);padding:0 20px 80px}
+  .wrap{max-width:980px;margin:0 auto;padding-top:22px}
   h1{font-size:22px;margin:0 0 4px}
   .sub{color:var(--soft);font-size:14px;margin:0 0 22px}
   .bar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
@@ -70,7 +153,9 @@
   #msg.err{color:var(--danger)} #msg.ok{color:var(--accent)}
   .pill{display:inline-block;background:#f0ebe2;border-radius:20px;padding:2px 10px;font-size:12px;margin-left:6px}
   a.back{color:var(--soft);font-size:13px;text-decoration:none}
-</style></head><body><div class="wrap">
+</style></head><body>
+<div id="topbar-mount"></div>
+<div class="wrap">
   <a class="back" href="admin.html">&larr; Admin</a>
   <h1>Task Queue</h1>
   <p class="sub">Every new task waits here until you decide it. <b>real</b> = normal task ·
@@ -84,8 +169,79 @@
   <div id="msg"></div>
   <div id="list"></div>
 </div>
+<!-- Shared topbar (role pill / sign out / Guide), same as the board + admin. -->
+<script>
+/**
+ * Shared topbar — ONE file, loaded by both the board and the admin page.
+ * Injects its own markup into #topbar-mount, then wires role display and
+ * sign out. Page-agnostic: talks only to /api/session and /api/logout,
+ * which both pages already serve from the same middleware. Edit here only.
+ */
+(function () {
+  'use strict';
+  var PROFILE_NAME = { 1: 'Public Viewer', 2: 'User', 3: 'Moderator', 4: 'Super Admin' };
+
+  var mount = document.getElementById('topbar-mount');
+  if (!mount) return;
+
+  mount.outerHTML =
+    '<div class="topbar" data-comp="Topbar">' +
+      '<div class="topbar-items">' +
+        '<label class="devguide" title="Outline & name each component — dev reference only">' +
+          '<input type="checkbox" id="guideToggle">' +
+          '<span class="lbl">Guide</span>' +
+        '</label>' +
+        '<div class="user-tools" id="userTools" style="display:none">' +
+          '<span class="user-pill">' +
+            '<span id="topbarUserIcon"></span>' +
+            '<span class="user-pill-role" id="topbarRole">-</span>' +
+          '</span>' +
+          '<span style="color:var(--skin-ink-soft)">|</span>' +
+          '<button class="signout-button" id="topbarSignout" type="button">Sign out</button>' +
+        '</div>' +
+        '<button class="signin-link" id="topbarSignin" style="display:none">Sign in</button>' +
+      '</div>' +
+    '</div>';
+
+  function refresh() {
+    fetch('/api/session').then(function (r) { return r.json(); }).then(function (s) {
+      var loggedIn = s.profile > 1;
+      document.getElementById('userTools').style.display = loggedIn ? '' : 'none';
+      document.getElementById('topbarSignin').style.display = loggedIn ? 'none' : '';
+      if (loggedIn) document.getElementById('topbarRole').textContent = PROFILE_NAME[s.profile] || ('Profile ' + s.profile);
+      document.dispatchEvent(new CustomEvent('topbar:session', { detail: s }));
+    }).catch(function () {});
+  }
+
+  // The person icon is sheet-driven (content-tab key "UserIcon"), same
+  // mechanism as the board's Logo/AdminIcon — change the icon by editing
+  // that cell, not this file. /api/content is public on both pages.
+  fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
+    var icon = (d.content || {}).UserIcon;
+    if (icon) document.getElementById('topbarUserIcon').innerHTML = icon;
+  }).catch(function () {});
+
+  function csrfToken() {
+    var m = document.cookie.match(/(?:^|;\s*)ts2_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  document.getElementById('topbarSignout').addEventListener('click', function () {
+    fetch('/api/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken() } })
+      .then(function () { window.location.href = '/'; });
+  });
+  document.getElementById('topbarSignin').addEventListener('click', function () {
+    document.dispatchEvent(new CustomEvent('topbar:signin-click'));
+  });
+
+  window.topbarRefresh = refresh;
+  refresh();
+})();
+
+</script>
 <script>
 'use strict';
+// Sign in lives on the dashboard; send the user there (returns via Admin link).
+document.addEventListener('topbar:signin-click', function () { window.location.href = 'index.html'; });
 let items = [];
 const $ = (s) => document.querySelector(s);
 
@@ -138,7 +294,15 @@ async function load() {
   try {
     const r = await fetch('/api/admin/queue', { credentials: 'same-origin' });
     const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'load failed');
+    if (!d.ok) {
+      if (r.status === 403 || /admin only/i.test(d.error || '')) {
+        $('#msg').textContent = '';
+        $('#list').innerHTML = '<div class="empty">This page is for signed-in admins.<br><br>'
+          + '<a class="back" href="index.html" style="font-size:14px">Go to sign in &rarr;</a></div>';
+        return;
+      }
+      throw new Error(d.error || 'load failed');
+    }
     items = d.items || [];
     $('#msg').textContent = '';
     render();
