@@ -490,7 +490,12 @@ async function load() {
   let d;
   try { d = await (await fetch('/api/admin/data')).json(); }
   catch (e) { $('report').innerHTML = '<div class="empty">Could not reach the server.</div>'; return; }
-  if (!d.ok) { $('report').innerHTML = '<div class="empty">' + esc(d.error || 'Admin only.') + '</div>'; return; }
+  if (!d.ok) {
+    $('report').innerHTML = '<div class="empty">This page is for signed-in admins.<br><br>'
+      + '<a class="btn primary" href="index.html">Go to sign in &rarr;</a></div>';
+    const dz = document.querySelector('.danger-zone'); if (dz) dz.style.display = 'none';
+    return;
+  }
   state.data = d;
   state.meta = d;
   $('who').textContent = d.admin + (d.stale ? ' · data may be stale' : '');
@@ -761,6 +766,9 @@ $('viewSeg').addEventListener('click', (e) => {
 ['groupBy','period','fProject','fUser','fStatus','fPriority'].forEach((id) => $(id).addEventListener('change', render));
 $('q').addEventListener('input', render);
 $('btnPrint').addEventListener('click', () => window.print());
+// The shared topbar's "Sign in" only fires an event; login lives on the
+// dashboard, so send the user there (they return via the Admin button).
+document.addEventListener('topbar:signin-click', () => { window.location.href = 'index.html'; });
 document.querySelectorAll('[data-fmt]').forEach((b) => b.addEventListener('click', () => {
   const f = b.dataset.fmt;
   if (f === 'csv') exportDelimited(',', 'csv', 'text/csv');
