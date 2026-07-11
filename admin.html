@@ -213,6 +213,17 @@
   }
   .btn:hover { background:var(--skin-surface-strong); }
   .btn.primary { background:var(--skin-accent); color:var(--skin-accent-ink); border-color:var(--skin-accent); }
+  .btn.danger { background:#b3261e; color:#fff; border-color:#b3261e; }
+  .btn.danger:disabled { opacity:.45; cursor:not-allowed; }
+
+  /* ---- danger zone (task reset) ---- */
+  .danger-zone { border-color:#e6c9c5; }
+  .dz-title { margin:0 0 6px; font-size:16px; color:#b3261e; }
+  .dz-note { margin:0 0 12px; color:var(--skin-ink-soft); font-size:13px; line-height:1.5; max-width:640px; }
+  .dz-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .dz-confirm { margin-top:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .dz-confirm input { font:inherit; padding:8px 10px; border:1px solid var(--skin-line); border-radius:var(--skin-radius); width:150px; }
+  .dz-info { font-size:13px; color:var(--skin-ink-soft); }
   /* .admin-button lives in middleware/shared/chrome.css (loaded via <link>),
      shared with the board's admin button. Do not redeclare here. */
   .exports { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
@@ -429,6 +440,21 @@
 
   <section class="panel">
     <div id="report"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="panel no-print danger-zone">
+    <h2 class="dz-title">⚠ Reset all tasks</h2>
+    <p class="dz-note">Permanently clears every task from the master board, the task↔sheet mapping, and all user sheets — the once-only switch from test data to real use. Projects, people, logins, content, icons and settings are all kept. This cannot be undone.</p>
+    <div class="dz-actions">
+      <button class="btn" id="btnResetPreview">Preview what will be cleared</button>
+      <span id="resetInfo" class="dz-info"></span>
+    </div>
+    <div id="resetConfirm" class="dz-confirm" style="display:none">
+      <label class="dz-info">Type <b>RESET</b> to enable the wipe:</label>
+      <input id="resetPhrase" type="text" autocomplete="off" placeholder="RESET">
+      <button class="btn danger" id="btnResetGo" disabled>Wipe all tasks</button>
+    </div>
+    <div id="resetResult" class="dz-info"></div>
   </section>
 </main>
 
@@ -743,6 +769,49 @@ document.querySelectorAll('[data-fmt]').forEach((b) => b.addEventListener('click
 }));
 
 load();
+
+// ---- Task reset (danger zone) --------------------------------------------
+// Two steps: preview (dry run, writes nothing) reveals the confirm row; then
+// the user must type RESET to enable the wipe. The reset endpoint is Profile-4
+// gated server-side; this UI is only the trigger.
+(function () {
+  const info = $('resetInfo'), confirmRow = $('resetConfirm'), phrase = $('resetPhrase');
+  const goBtn = $('btnResetGo'), previewBtn = $('btnResetPreview'), result = $('resetResult');
+
+  previewBtn.addEventListener('click', async () => {
+    info.textContent = 'Checking…';
+    result.textContent = '';
+    try {
+      const r = await (await fetch('/api/admin/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true }),
+      })).json();
+      if (!r.ok) { info.textContent = 'Could not check: ' + (r.error || 'error'); return; }
+      const lines = (r.plan || []).filter((p) => p.dataRows).map((p) => `${p.label}: ${p.dataRows}`);
+      info.textContent = `${r.wouldClear} task row(s) would be cleared` + (lines.length ? ` — ${lines.join(', ')}.` : '.');
+      confirmRow.style.display = 'flex';
+    } catch (e) { info.textContent = 'Could not reach the server.'; }
+  });
+
+  phrase.addEventListener('input', () => { goBtn.disabled = phrase.value.trim() !== 'RESET'; });
+
+  goBtn.addEventListener('click', async () => {
+    if (phrase.value.trim() !== 'RESET') return;
+    goBtn.disabled = true; goBtn.textContent = 'Wiping…';
+    result.textContent = '';
+    try {
+      const r = await (await fetch('/api/admin/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'RESET' }),
+      })).json();
+      if (!r.ok) { result.textContent = 'Reset failed: ' + (r.error || 'error'); goBtn.textContent = 'Wipe all tasks'; return; }
+      const total = (r.cleared || []).reduce((n, c) => n + (c.cleared || 0), 0);
+      result.textContent = `✓ Done — cleared ${total} task row(s). Reloading…`;
+      confirmRow.style.display = 'none'; info.textContent = '';
+      setTimeout(() => location.reload(), 1500);
+    } catch (e) { result.textContent = 'Could not reach the server.'; goBtn.textContent = 'Wipe all tasks'; }
+  });
+})();
 </script>
 </body>
 </html>
