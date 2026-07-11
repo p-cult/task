@@ -566,29 +566,7 @@
     background: var(--skin-surface); color: var(--skin-ink-soft); font: inherit;
   }
 
-  /* ===== DEV GUIDE OVERLAY (purge at go-live) =============================
-     A dev-only toggle that outlines every tagged component and names it, as a
-     transparent reference guide while prompting for changes. To remove for
-     production, delete: this CSS block, the .devguide toggle markup in the
-     header, the DEV GUIDE <script> block, and every data-comp="…" attribute.
-     Search the file for "DEV GUIDE" / "data-comp". */
-  .devguide { display: flex; align-items: center; gap: 7px; margin-right: 4px; cursor: pointer; user-select: none; }
-  .devguide input { position: absolute; opacity: 0; pointer-events: none; }
-  .devguide .track { width: 34px; height: 18px; border-radius: 999px; background: var(--skin-line); position: relative; transition: background .15s; }
-  .devguide .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: left .15s; }
-  .devguide input:checked + .track { background: #e91e63; }
-  .devguide input:checked + .track::after { left: 18px; }
-  .devguide .lbl { font-size: 12px; color: var(--skin-ink-soft); }
-
-  body.guide-on [data-comp] { outline: 1px solid rgba(233,30,99,.7); outline-offset: -1px; }
-  body.guide-on [data-comp]:not(dialog) { position: relative; }
-  body.guide-on [data-comp]::after {
-    content: attr(data-comp);
-    position: absolute; top: 0; left: 0; z-index: 9999; pointer-events: none;
-    background: #e91e63; color: #fff; font: 600 10px/1.5 var(--skin-font);
-    padding: 0 5px; border-bottom-right-radius: 5px; letter-spacing: .3px; white-space: nowrap;
-  }
-  /* ===== end dev guide ==================================================== */
+  
 </style>
 </head>
 <body data-source="loading">
@@ -613,12 +591,8 @@
   if (!mount) return;
 
   mount.outerHTML =
-    '<div class="topbar" data-comp="Topbar">' +
+    '<div class="topbar">' +
       '<div class="topbar-items">' +
-        '<label class="devguide" title="Outline & name each component — dev reference only">' +
-          '<input type="checkbox" id="guideToggle">' +
-          '<span class="lbl">Guide</span>' +
-        '</label>' +
         '<div class="user-tools" id="userTools" style="display:none">' +
           '<span class="user-pill">' +
             '<span id="topbarUserIcon"></span>' +
@@ -673,38 +647,38 @@
      by applyContent(), same mechanism as the Logo. To change an icon,
      replace the SVG in its sheet cell — nothing here needs to change. -->
 
-<header class="app" data-comp="Header">
-  <span class="brand" data-comp="Brand">
-    <span class="brand-wordmark" data-content-html="Logo" data-comp="BrandWordmark" aria-label="logo"></span>
-    <div class="brand-copy" data-comp="BrandCopy">
+<header class="app">
+  <span class="brand">
+    <span class="brand-wordmark" data-content-html="Logo" aria-label="logo"></span>
+    <div class="brand-copy">
       <h1 id="appTitle" data-content="SubHead">-</h1>
       <p class="subtitle" id="subtitle" data-content="PageName">-</p>
     </div>
   </span>
-  <div class="header-controls" data-comp="HeaderControls">
-    <div class="sync-tools" data-comp="SyncTools">
-      <div class="sync" id="syncStatus" data-state="syncing" data-comp="SyncStatus">
+  <div class="header-controls">
+    <div class="sync-tools">
+      <div class="sync" id="syncStatus" data-state="syncing">
         <span class="sync-dot" aria-hidden="true"></span>
         <span class="sync-text" id="syncText">…</span>
       </div>
-      <button class="sync-button" id="syncButton" type="button" data-comp="SyncButton" aria-label="Sync latest data">
+      <button class="sync-button" id="syncButton" type="button" aria-label="Sync latest data">
         <span data-content-html="SyncIcon"></span>
       </button>
     </div>
     <!-- Admin button aligned with sync tools -->
-    <a class="admin-button" id="adminLinkHeader" href="admin.html" data-comp="AdminButtonHeader" data-min-profile-inline="4" style="display:none" title="Admin reports">
+    <a class="admin-button" id="adminLinkHeader" href="admin.html" data-min-profile-inline="4" style="display:none" title="Admin reports">
       <span data-content-html="AdminIcon" style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"></span>
     </a>
   </div>
 </header>
 
-<p class="offline" data-comp="OfflineBar">Not connected to the app server. Open <code>http://localhost:4300</code> — not Live Server / file preview. Start it with <code>./run.sh</code> from the project folder.</p>
-<p class="stale" data-comp="StaleBar">Showing sample data — not connected to the live sheet yet.</p>
+<p class="offline">Not connected to the app server. Open <code>http://localhost:4300</code> — not Live Server / file preview. Start it with <code>./run.sh</code> from the project folder.</p>
+<p class="stale">Showing sample data — not connected to the live sheet yet.</p>
 
-<main data-comp="Main">
-  <p data-content="PublicNote" id="publicNote" data-comp="PublicNote" style="color:var(--skin-ink-soft);margin-top:0"></p>
+<main>
+  <p data-content="PublicNote" id="publicNote" style="color:var(--skin-ink-soft);margin-top:0"></p>
 
-  <section class="summary-panel" id="summaryPanel" data-comp="SummaryPanel">
+  <section class="summary-panel" id="summaryPanel">
     <div class="summary-panel-head">
       <div class="summary-panel-title" data-content="Container-2">Overview</div>
       <button class="summary-toggle" id="summaryToggle" type="button" aria-expanded="false" aria-controls="summaryBody" data-content-aria="Summary-Expand">
@@ -714,7 +688,7 @@
     <div class="summary-panel-body" id="summaryBody">
       <!-- Wireframe layout: label on top, big number below. Counts reflect the
            profile-scoped task list, so each profile sees its own context. -->
-      <div class="ov-cards" data-comp="OverviewCards">
+      <div class="ov-cards">
         <div class="ov-card"><span data-content="Stat-Total">Total</span><strong id="statTotal">0</strong></div>
         <div class="ov-card"><span data-content="Stat-Scheduled">Scheduled</span><strong id="statScheduled">0</strong></div>
         <div class="ov-card"><span data-content="Stat-Completed">Completed</span><strong id="statCompleted">0</strong></div>
@@ -722,7 +696,7 @@
       <!-- Per-person strips (name • total | scheduled | completed), scrollable
            with chevron nav. Rendered by updateSummary(); hidden when the scoped
            task list carries no assignees. -->
-      <div class="ov-users" id="ovUsers" data-comp="OverviewUsers" style="display:none">
+      <div class="ov-users" id="ovUsers" style="display:none">
         <button class="ov-nav ov-nav--prev" id="ovPrev" type="button" aria-label="Previous"><span data-content-html="ChevronIcon"></span></button>
         <div class="ov-strips" id="ovStrips"></div>
         <button class="ov-nav ov-nav--next" id="ovNext" type="button" aria-label="Next"><span data-content-html="ChevronIcon"></span></button>
@@ -730,23 +704,23 @@
     </div>
   </section>
 
-  <div class="task-panel" data-comp="TaskPanel">
+  <div class="task-panel">
     <div class="task-panel-head">
       <h2 class="task-panel-title" data-content="Container-4">Task List</h2>
-      <div class="toolbar" data-comp="Toolbar">
-        <div class="tabs" id="tabs" data-comp="Tabs">
+      <div class="toolbar">
+        <div class="tabs" id="tabs">
           <button class="tab active" data-tab="all"><span data-content="Board-All">All Tasks</span> <span class="tab-count" id="tabCountAll">0</span></button>
           <button class="tab" data-tab="mine" data-min-profile-inline="2" style="display:none"><span data-content="Board-Mine">My Tasks</span> <span class="tab-count" id="tabCountMine">0</span></button>
           <button class="tab" data-tab="completed"><span data-content="Board-Completed">Completed</span> <span class="tab-count" id="tabCountCompleted">0</span></button>
         </div>
         <span class="spacer"></span>
-        <button class="btn" id="newTaskBtn" data-comp="NewTaskBtn" data-min-profile-inline="2" style="display:none">
+        <button class="btn" id="newTaskBtn" data-min-profile-inline="2" style="display:none">
           + <span data-content="Board-New">New Task</span>
         </button>
       </div>
     </div>
 
-    <div class="filters" data-comp="Filters">
+    <div class="filters">
       <select id="fProject"><option value="" data-content="Filter-All">All</option></select>
       <select id="fStatus"><option value="" data-content="Filter-All">All</option></select>
       <select id="fPriority"><option value="" data-content="Filter-All">All</option></select>
@@ -758,14 +732,14 @@
       </select>
     </div>
 
-    <div class="task-list" id="taskList" data-comp="TaskList"></div>
+    <div class="task-list" id="taskList"></div>
     <div class="empty" id="emptyRow" style="display:none" data-content="Empty-Tasks">No tasks to show.</div>
   </div>
 </main>
 
-<footer data-content="Container-5" data-comp="Footer">·</footer>
+<footer data-content="Container-5">·</footer>
 
-<dialog id="loginDlg" data-comp="LoginDialog">
+<dialog id="loginDlg">
   <form class="login" id="loginForm" method="dialog">
     <h3 data-content="LoginPrompt">Sign in</h3>
     <label>Username</label>
@@ -781,7 +755,7 @@
   </form>
 </dialog>
 
-<dialog id="newDlg" class="wide" data-comp="NewTaskDialog">
+<dialog id="newDlg" class="wide">
   <form class="login" id="newForm" method="dialog">
     <h3 data-content="New-Title">Create a task</h3>
     <div class="form-grid">
@@ -818,7 +792,7 @@
   </form>
 </dialog>
 
-<dialog id="editDlg" class="wide" data-comp="EditTaskDialog">
+<dialog id="editDlg" class="wide">
   <form class="login" id="editForm" method="dialog">
     <h3 data-content="Edit-Title">Edit task</h3>
     <input type="hidden" id="eId">
@@ -1429,36 +1403,8 @@
   refreshSession();
 </script>
 
-<!-- ===== DEV GUIDE behaviour (purge at go-live) =========================
-     Wires the header toggle to the outline/label overlay; remembers the
-     choice across reloads. Self-contained: delete this whole block to remove. -->
-<script>
-  (function () {
-    var toggle = document.getElementById('guideToggle');
-    if (!toggle) return;
-    var on = localStorage.getItem('ts2_guide') === '1';
-    toggle.checked = on;
-    document.body.classList.toggle('guide-on', on);
-    toggle.addEventListener('change', function () {
-      document.body.classList.toggle('guide-on', toggle.checked);
-      localStorage.setItem('ts2_guide', toggle.checked ? '1' : '0');
-    });
-  })();
-</script>
 
-<!-- ===== DEV live-reload (purge at go-live) =============================
-     Subscribes to the middleware's change stream and refreshes the page
-     whenever a watched file changes. Only works when served by our server
-     (localhost:4300); silently no-ops elsewhere. Delete this whole block
-     to remove. -->
-<script>
-  (function () {
-    if (!window.EventSource) return;
-    try {
-      var es = new EventSource('/api/livereload');
-      es.onmessage = function () { location.reload(); };
-    } catch (e) { /* not served by our middleware — ignore */ }
-  })();
-</script>
+
+
 </body>
 </html>
