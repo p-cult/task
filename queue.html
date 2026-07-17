@@ -212,9 +212,21 @@
   // The person icon is sheet-driven (content-tab key "UserIcon"), same
   // mechanism as the board's Logo/AdminIcon — change the icon by editing
   // that cell, not this file. /api/content is public on both pages.
+  function sanitizeHtml(html) {
+    var div = document.createElement('div');
+    div.textContent = html; // parse as text, not HTML
+    var temp = document.createElement('div');
+    temp.innerHTML = html; // now parse safely with HTMLPurify behavior
+    // Remove any script tags, event handlers, or dangerous attributes
+    var scripts = temp.querySelectorAll('script');
+    scripts.forEach(function (s) { s.remove(); });
+    var elements = temp.querySelectorAll('[onclick],[onerror],[onload]');
+    elements.forEach(function (e) { e.removeAttribute('onclick'); e.removeAttribute('onerror'); e.removeAttribute('onload'); });
+    return temp.innerHTML;
+  }
   fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
     var icon = (d.content || {}).UserIcon;
-    if (icon) document.getElementById('topbarUserIcon').innerHTML = icon;
+    if (icon) document.getElementById('topbarUserIcon').innerHTML = sanitizeHtml(icon);
   }).catch(function () {});
 
   function csrfToken() {
@@ -237,7 +249,7 @@
 <script>
 'use strict';
 // Sign in lives on the dashboard; send the user there (returns via Admin link).
-document.addEventListener('topbar:signin-click', function () { window.location.href = 'index.html'; });
+document.addEventListener('topbar:signin-click', function () { window.location.href = '/'; });
 
 // Page copy comes from the master content tab (data-content / data-content-ph);
 // the hardcoded text is the fallback until a key is filled in the sheet.

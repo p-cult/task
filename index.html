@@ -553,6 +553,12 @@
     background: var(--skin-bg); color: var(--skin-ink);
   }
   .form-grid textarea { resize: vertical; min-height: 60px; }
+  /* Locked fields: permission boundary, not system issue */
+  .form-grid .locked-by-role {
+    opacity: 0.65; background: color-mix(in srgb, var(--skin-bg) 70%, #999 30%);
+    cursor: not-allowed;
+  }
+  .form-grid .locked-by-role::placeholder { opacity: 0.5; }
   .new-result { font-size: 13px; margin-top: 12px; min-height: 18px; }
   .new-result.ok { color: var(--skin-accent); }
   .new-result.bad { color: #b3261e; }
@@ -618,9 +624,21 @@
   // The person icon is sheet-driven (content-tab key "UserIcon"), same
   // mechanism as the board's Logo/AdminIcon — change the icon by editing
   // that cell, not this file. /api/content is public on both pages.
+  function sanitizeHtml(html) {
+    var div = document.createElement('div');
+    div.textContent = html; // parse as text, not HTML
+    var temp = document.createElement('div');
+    temp.innerHTML = html; // now parse safely with HTMLPurify behavior
+    // Remove any script tags, event handlers, or dangerous attributes
+    var scripts = temp.querySelectorAll('script');
+    scripts.forEach(function (s) { s.remove(); });
+    var elements = temp.querySelectorAll('[onclick],[onerror],[onload]');
+    elements.forEach(function (e) { e.removeAttribute('onclick'); e.removeAttribute('onerror'); e.removeAttribute('onload'); });
+    return temp.innerHTML;
+  }
   fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
     var icon = (d.content || {}).UserIcon;
-    if (icon) document.getElementById('topbarUserIcon').innerHTML = icon;
+    if (icon) document.getElementById('topbarUserIcon').innerHTML = sanitizeHtml(icon);
   }).catch(function () {});
 
   function csrfToken() {
@@ -715,13 +733,13 @@
         </div>
         <span class="spacer"></span>
         <button class="btn" id="newTaskBtn" data-min-profile-inline="2" style="display:none">
-          + <span data-content="Board-New">New Task</span>
+          + <span data-content="Board-New">Add Task</span>
         </button>
       </div>
     </div>
 
     <div class="filters">
-      <select id="fProject"><option value="" data-content="Filter-All">All</option></select>
+      <select id="fUser"><option value="" data-content="Filter-All">All</option></select>
       <select id="fStatus"><option value="" data-content="Filter-All">All</option></select>
       <select id="fPriority"><option value="" data-content="Filter-All">All</option></select>
       <input id="fSearch" type="search" placeholder="Search tasks" data-content-ph="Filter-Search">
@@ -751,7 +769,49 @@
       <button class="btn" type="submit" style="flex:1">Sign in</button>
       <button class="btn ghost" type="button" id="loginCancel">Cancel</button>
     </div>
-    <p class="hint">Use the username and password set for you in the master sheet. Contact the admin if you don't have one.</p>
+    <p class="hint">Contact the admin if you need login credentials. <button type="button" class="btn ghost" id="forgotPasswordLink" style="padding:0; font-size:inherit; text-decoration:underline;">Forgot password?</button></p>
+  </form>
+</dialog>
+
+<dialog id="forgotPasswordDlg">
+  <form class="login" id="forgotPasswordForm" method="dialog">
+    <h3>Recover Password</h3>
+    <div id="fpStep1">
+      <p style="font-size:13px; color:var(--skin-ink-soft); margin:0 0 12px;">Enter your username to receive a password reset code.</p>
+      <label>Username</label>
+      <input id="fpUsername" type="text" autocomplete="username" autofocus>
+      <div class="err" id="fpErr"></div>
+      <div class="row">
+        <button class="btn" type="button" id="fpRequestBtn" style="flex:1">Send reset code</button>
+        <button class="btn ghost" type="button" id="fpCancel">Cancel</button>
+      </div>
+    </div>
+    <div id="fpStep2" style="display:none;">
+      <p style="font-size:13px; color:var(--skin-ink-soft); margin:0 0 12px;">Check your Google Chat for the code, then set a new password.</p>
+      <label>Reset Code</label>
+      <input id="fpOtp" autocomplete="off" placeholder="Enter 8-character code">
+      <label style="margin-top:12px;">New Password</label>
+      <input id="fpNewPassword" type="password" autocomplete="new-password" placeholder="At least 6 characters">
+      <div class="err" id="fpErr2"></div>
+      <div class="row">
+        <button class="btn" type="button" id="fpVerifyBtn" style="flex:1">Reset password</button>
+        <button class="btn ghost" type="button" id="fpBackBtn">Back</button>
+      </div>
+    </div>
+    <div id="fpStep3" style="display:none; text-align:center;">
+      <p style="font-size:14px; margin:24px 0;">✓ Password reset confirmed</p>
+      <p style="font-size:13px; color:var(--skin-ink-soft); margin:12px 0 24px;">Syncing with server...</p>
+      <div style="width:100%; height:3px; background:#e0e0e0; border-radius:2px; overflow:hidden;">
+        <div style="height:100%; background:#4caf50; animation:progress 1.5s ease-in-out infinite; width:100%; transform-origin:0 0;"></div>
+      </div>
+      <style>
+        @keyframes progress {
+          0% { transform: scaleX(0); }
+          50% { transform: scaleX(1); }
+          100% { transform: scaleX(0); }
+        }
+      </style>
+    </div>
   </form>
 </dialog>
 
@@ -817,13 +877,22 @@
         <label data-content="Edit-Status">Status</label>
         <select id="eStatus"><!-- options built from the content tab (Status-Options) --></select>
       </div>
+      <div id="eClassifierWrap" hidden>
+        <label data-content="Edit-Classifier">Classification</label>
+        <select id="eClassifier">
+          <option value="">—Clear—</option>
+          <option value="silly">Silly (hidden)</option>
+          <option value="routine">Routine (logged only)</option>
+          <option value="other">Other (logged only)</option>
+        </select>
+      </div>
       <div class="full" id="eRevNoteWrap" hidden>
         <label data-content="Edit-RevNote">Revision note (why is it going back?)</label>
         <textarea id="eRevNote"></textarea>
       </div>
       <div class="full">
         <label data-content="Edit-Deadline">Deadline</label>
-        <input id="eDeadline" placeholder="DD-MMM | HH:MM" autocomplete="off">
+        <input id="eDeadline" placeholder="DD MMM | HH:MM" autocomplete="off">
       </div>
       <div class="full">
         <label data-content="Edit-Notes">Notes</label>
@@ -870,7 +939,7 @@
   }
   async function render() {
     try {
-      const { content, source, stale } = await (await fetch('/api/content')).json();
+      const { content, source, stale } = await (await fetch('/api/content', { credentials: 'same-origin' })).json();
       Object.assign(CONTENT, content);
       document.body.dataset.source = source;   // 'live' or 'dev' (sync pill uses this)
       state.dataStale = !!stale || source === 'dev';
@@ -950,7 +1019,7 @@
   // see middleware/shared/topbar.js. This just reacts to its session fetch
   // for board-specific concerns (profile gating, tab fallback).
   async function refreshSession() {
-    const s = await (await fetch('/api/session')).json();
+    const s = await (await fetch('/api/session', { credentials: 'same-origin' })).json();
     document.body.dataset.profile = s.profile;
     state.profile = s.profile || 1;
     state.displayName = s.displayName || '';
@@ -971,13 +1040,13 @@
     setSyncState('syncing');
     try {
       const [tasksRes, projRes] = await Promise.all([
-        fetch('/api/tasks').then((r) => r.json()),
-        fetch('/api/projects').then((r) => r.json()),
+        fetch('/api/tasks', { credentials: 'same-origin' }).then((r) => r.json()),
+        fetch('/api/projects', { credentials: 'same-origin' }).then((r) => r.json()),
       ]);
       state.tasks = tasksRes.tasks || [];
       state.canWrite = !!tasksRes.canWrite;
       state.projects = projRes.projects || [];
-      state.dataStale = !!tasksRes.stale || tasksRes.source === 'dev' || state.dataStale;
+      state.dataStale = !!tasksRes.stale || tasksRes.source === 'dev';
       state.lastUpdated = new Date();
       buildFilterOptions();
       fillProjectDropdown();
@@ -1064,9 +1133,10 @@
     if (prev && values.includes(prev)) sel.value = prev;
   }
   function buildFilterOptions() {
-    fillSelect($('fProject'),  uniq(state.tasks.map((t) => t.projectLabel)).sort());
+    fillSelect($('fUser'),     uniq(state.tasks.map((t) => t.assignedTo)).sort((a, b) => assigneeLabel(a).localeCompare(assigneeLabel(b))));
     fillSelect($('fStatus'),   uniq(state.tasks.map((t) => t.status)).sort());
     fillSelect($('fPriority'), ['High', 'Medium', 'Low'].filter((p) => state.tasks.some((t) => t.priority === p)));
+    [...$('fUser').options].slice(1).forEach((option) => { option.textContent = assigneeLabel(option.value); });
   }
   function fillProjectDropdown() {
     const sel = $('nProject');
@@ -1089,13 +1159,47 @@
     } else {
       list = list.filter((t) => !isCompletedTask(t));
     }
-    const proj = $('fProject').value, st = $('fStatus').value, pri = $('fPriority').value;
+    const user = $('fUser').value, st = $('fStatus').value, pri = $('fPriority').value;
     const q = $('fSearch').value.trim().toLowerCase();
-    if (proj) list = list.filter((t) => t.projectLabel === proj);
+    if (user) list = list.filter((t) => t.assignedTo === user);
     if (st)   list = list.filter((t) => t.status === st);
     if (pri)  list = list.filter((t) => t.priority === pri);
     if (q)    list = list.filter((t) => (t.name + ' ' + (t.description || '')).toLowerCase().includes(q));
+    // Most urgent on top, in every tab: overdue first, then High→Low priority,
+    // then soonest deadline. Applies to All / Mine / Completed alike.
+    list.sort(byUrgency);
     return list;
+  }
+
+  // Deadline as a comparable timestamp. Accepts ISO or the board's
+  // "DD-Mon | HH:MM" format; no/unparseable deadline sorts last (Infinity).
+  function deadlineMs(t) {
+    const s = String(t && t.endDate || '').trim();
+    if (!s) return Infinity;
+    const iso = Date.parse(s);
+    if (!isNaN(iso)) return iso;
+    const m = /^(\d{1,2})-([A-Za-z]{3})(?:\s*\|\s*(\d{1,2}):(\d{2}))?/.exec(s);
+    if (m) {
+      const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+      const mon = months.indexOf(m[2].toLowerCase());
+      if (mon >= 0) {
+        return new Date(new Date().getFullYear(), mon, Number(m[1]),
+          m[3] ? Number(m[3]) : 23, m[4] ? Number(m[4]) : 59).getTime();
+      }
+    }
+    return Infinity;
+  }
+  const PRI_RANK = { High: 0, Medium: 1, Low: 2 };
+  function byUrgency(a, b) {
+    // 1) overdue before not-overdue
+    const ao = a.overdue ? 0 : 1, bo = b.overdue ? 0 : 1;
+    if (ao !== bo) return ao - bo;
+    // 2) higher effective priority first
+    const ap = PRI_RANK[a.priority] != null ? PRI_RANK[a.priority] : 2;
+    const bp = PRI_RANK[b.priority] != null ? PRI_RANK[b.priority] : 2;
+    if (ap !== bp) return ap - bp;
+    // 3) soonest deadline first
+    return deadlineMs(a) - deadlineMs(b);
   }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -1173,20 +1277,35 @@
     const isModOrAdmin = state.profile >= 3;
     updateStatusDropdown($('eStatus'), isModOrAdmin);
     ensureStatusOption($('eStatus'), task.status || 'Assigned');
-    // If user is not mod/admin and views an admin-only status, they cannot change it
-    if (!isModOrAdmin && (task.status === 'Assigned' || task.status === 'Approved')) {
-      $('eStatus').disabled = true;
-    } else {
-      $('eStatus').disabled = false;
-    }
+    // Status dropdown is always enabled; the server will reject forbidden status changes.
+    // Even if a P2 user views a task in "Assigned" (admin-only), they can still move it
+    // to user-allowed statuses like Ongoing, Paused, Rejected, or Completed.
+    $('eStatus').disabled = false;
     // Moderator (P3): approve & classify only — every field except status locked
     const modOnly = state.profile === 3;
-    ['eName', 'eDesc', 'eNotes', 'eDeadline'].forEach((id) => { $(id).disabled = modOnly; });
+    ['eName', 'eDesc', 'eNotes', 'eDeadline'].forEach((id) => {
+      const el = $(id);
+      el.disabled = modOnly;
+      if (modOnly) {
+        el.setAttribute('aria-label', 'Locked for moderators (can only approve and classify)');
+        el.classList.add('locked-by-role');
+      } else {
+        el.removeAttribute('aria-label');
+        el.classList.remove('locked-by-role');
+      }
+    });
     $('eDeadline').value = task.endDate || '';
+    // Classifier: only P3/P4 can see/change
+    $('eClassifierWrap').hidden = state.profile < 3;
+    $('eClassifier').value = task.classifier || '';
     $('eRevNote').value = '';
     $('eRevNoteWrap').hidden = $('eStatus').value !== 'Revision';
     $('editResult').textContent = '';
     $('editResult').className = 'new-result';
+    // Re-enable Save: a prior successful save leaves the button disabled and
+    // closes the dialog, so without this the *next* edit opens with a dead
+    // Save button and silently does nothing.
+    $('editForm').querySelector('button[type="submit"]').disabled = false;
     $('editDlg').showModal();
   }
 
@@ -1256,7 +1375,7 @@
   document.getElementById('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('.tab'); if (b) selectTab(b.dataset.tab);
   });
-  ['fProject', 'fStatus', 'fPriority', 'fCompleted'].forEach((id) => $(id).addEventListener('change', drawCards));
+  ['fUser', 'fStatus', 'fPriority', 'fCompleted'].forEach((id) => $(id).addEventListener('change', drawCards));
   $('fSearch').addEventListener('input', drawCards);
   $('syncButton').addEventListener('click', triggerSync);
   $('summaryToggle').addEventListener('click', () => setSummaryOpen(!state.summaryOpen));
@@ -1282,8 +1401,92 @@
     await refreshSession();
   });
 
+  // forgot password dialog
+  const fpDlg = $('forgotPasswordDlg');
+  $('forgotPasswordLink').addEventListener('click', (e) => {
+    e.preventDefault();
+    $('fpErr').textContent = '';
+    $('fpErr2').textContent = '';
+    $('fpUsername').value = '';
+    $('fpOtp').value = '';
+    $('fpNewPassword').value = '';
+    $('fpStep1').style.display = 'block';
+    $('fpStep2').style.display = 'none';
+    $('fpStep3').style.display = 'none';
+    fpDlg.showModal();
+  });
+
+  $('fpCancel').addEventListener('click', () => fpDlg.close());
+  $('fpBackBtn').addEventListener('click', () => {
+    $('fpErr').textContent = '';
+    $('fpErr2').textContent = '';
+    $('fpStep1').style.display = 'block';
+    $('fpStep2').style.display = 'none';
+    $('fpStep3').style.display = 'none';
+  });
+
+  $('fpRequestBtn').addEventListener('click', async () => {
+    const username = $('fpUsername').value.trim();
+    if (!username) { $('fpErr').textContent = 'Username is required'; return; }
+    $('fpRequestBtn').disabled = true;
+    $('fpErr').textContent = '';
+    try {
+      const r = await postJson('/api/forgot-password/request', { username });
+      const d = await r.json();
+      $('fpRequestBtn').disabled = false;
+      if (!d.ok) { $('fpErr').textContent = d.error || 'Request failed'; return; }
+      $('fpStep1').style.display = 'none';
+      $('fpStep2').style.display = 'block';
+      $('fpOtp').focus();
+    } catch (e) {
+      $('fpRequestBtn').disabled = false;
+      $('fpErr').textContent = 'Network error';
+    }
+  });
+
+  $('fpVerifyBtn').addEventListener('click', async () => {
+    const username = $('fpUsername').value.trim();
+    const otp = $('fpOtp').value.trim().toUpperCase();
+    const newPassword = $('fpNewPassword').value.trim();
+
+    if (!otp) { $('fpErr2').textContent = 'Reset code is required'; return; }
+    if (!newPassword) { $('fpErr2').textContent = 'New password is required'; return; }
+    if (newPassword.length < 6) { $('fpErr2').textContent = 'Password must be at least 6 characters'; return; }
+
+    $('fpVerifyBtn').disabled = true;
+    $('fpErr2').textContent = '';
+    try {
+      const r = await postJson('/api/forgot-password/verify', { username, otp, newPassword });
+      const d = await r.json();
+
+      if (!d.ok) {
+        $('fpVerifyBtn').disabled = false;
+        $('fpErr2').textContent = d.error || 'Reset failed';
+        return;
+      }
+
+      // Success — show confirmation state and wait for sync
+      $('fpErr2').textContent = '';
+      $('fpStep2').style.display = 'none';
+      $('fpStep3').style.display = 'block';
+
+      // Wait for backend to complete write and sync (2 seconds gives time for sheet writes)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Close dialog and return to login
+      fpDlg.close();
+    } catch (e) {
+      $('fpVerifyBtn').disabled = false;
+      $('fpErr2').textContent = 'Network error';
+    }
+  });
+
   // new task: dropdown selection prefills the name with the edition's pseudo prefix
   const newDlg = $('newDlg');
+  // Add Task (signed-in users) → inline dialog that posts to /api/tasks, which
+  // is session-scoped: the task is written to THIS logged-in user's own sheet
+  // (no name-picking). Regular users' submissions route through the admin queue
+  // for approval; admin (P4) creates land directly.
   $('newTaskBtn').addEventListener('click', () => {
     $('newResult').textContent = ''; $('newResult').className = 'new-result';
     fillProjectDropdown(); applyPrefill(); newDlg.showModal();
@@ -1353,6 +1556,7 @@
     if (!$('eNotes').disabled) body.notes = $('eNotes').value.trim();
     if (!$('ePriority').disabled) body.priority = $('ePriority').value;
     if (!$('eStatus').disabled) body.status = $('eStatus').value;
+    if (!$('eClassifierWrap').hidden) body.classifier = $('eClassifier').value;
     if (!$('eDeadline').disabled) body.deadline = $('eDeadline').value.trim();
     if (body.name !== undefined && !body.name) {
       out.className = 'new-result bad';

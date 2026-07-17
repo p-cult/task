@@ -227,6 +227,25 @@
   .btn.danger { background:#b3261e; color:#fff; border-color:#b3261e; }
   .btn.danger:disabled { opacity:.45; cursor:not-allowed; }
 
+  /* ---- review queue ---- */
+  .queue-task { font-weight:600; }
+  .queue-description { color:var(--skin-ink-soft); margin-top:3px; white-space:pre-wrap; }
+  .queue-meta { color:var(--skin-ink-soft); font-size:12px; margin-top:4px; }
+  .queue-error { color:#b3261e; font-size:12px; margin-top:6px; white-space:pre-wrap; }
+  .queue-actions { display:flex; flex-wrap:wrap; gap:6px; }
+  .queue-actions .btn { padding:6px 9px; font-size:12px; }
+  .queue-actions .routine { border-color:#b9974f; }
+  .queue-actions .silly { border-color:#9a7c3c; }
+  .queue-header { margin-bottom:20px; }
+  .queue-bulk, .project-errors { margin-bottom:15px; padding:10px; background:#f5f5f5; border-radius:4px; }
+  .bulk-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .selected-count { font-weight:bold; color:#333; }
+  .project-errors { background:#fff3cd; border-left:4px solid #ffc107; }
+  .error-label { margin-bottom:8px; font-weight:bold; }
+  .resolve-projects { margin-top:8px; }
+  [data-queue-row].selected { background-color:#f0f7ff; }
+  .queue-item-check, .queue-select-all { cursor:pointer; }
+
   /* ---- danger zone (task reset) ---- */
   .danger-zone { border-color:#e6c9c5; }
   .dz-title { margin:0 0 6px; font-size:16px; color:#b3261e; }
@@ -238,6 +257,24 @@
   /* .admin-button lives in middleware/shared/chrome.css (loaded via <link>),
      shared with the board's admin button. Do not redeclare here. */
   .exports { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; }
+
+  /* ---- direct bulk import ---- */
+  .import-panel { display:none; }
+  .import-head { display:flex; gap:14px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }
+  .import-head h2 { margin:0 0 4px; font-size:18px; }
+  .import-note { margin:0; color:var(--skin-ink-soft); font-size:13px; max-width:720px; }
+  .import-json { width:100%; min-height:150px; margin-top:14px; resize:vertical; font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; padding:12px; border:1px solid var(--skin-line); border-radius:var(--skin-radius); background:var(--skin-bg); color:var(--skin-ink); }
+  .import-tools { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin:14px 0; }
+  .import-tools select, .import-tools input { font:inherit; padding:8px 10px; border:1px solid var(--skin-line); border-radius:var(--skin-radius); background:var(--skin-surface); color:var(--skin-ink); }
+  .import-table-wrap { overflow:auto; border:1px solid var(--skin-line); border-radius:var(--skin-radius); }
+  .import-table { min-width:980px; }
+  .import-table input, .import-table select { width:100%; min-width:110px; font:inherit; padding:6px 7px; border:1px solid var(--skin-line); border-radius:6px; background:var(--skin-surface); color:var(--skin-ink); }
+  .import-table input[type=checkbox] { min-width:0; width:auto; }
+  .import-table .bad { background:#fff2f0; }
+  .import-table .row-error { display:block; color:#b3261e; font-size:11px; margin-top:3px; max-width:220px; }
+  .import-result { margin-top:12px; font-size:13px; color:var(--skin-ink-soft); white-space:pre-wrap; }
+  .import-result.bad { color:#b3261e; }
+  .import-result.ok { color:var(--skin-accent); }
 
   /* ---- summary cards ---- */
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:4px; }
@@ -335,9 +372,21 @@
   // The person icon is sheet-driven (content-tab key "UserIcon"), same
   // mechanism as the board's Logo/AdminIcon — change the icon by editing
   // that cell, not this file. /api/content is public on both pages.
+  function sanitizeHtml(html) {
+    var div = document.createElement('div');
+    div.textContent = html; // parse as text, not HTML
+    var temp = document.createElement('div');
+    temp.innerHTML = html; // now parse safely with HTMLPurify behavior
+    // Remove any script tags, event handlers, or dangerous attributes
+    var scripts = temp.querySelectorAll('script');
+    scripts.forEach(function (s) { s.remove(); });
+    var elements = temp.querySelectorAll('[onclick],[onerror],[onload]');
+    elements.forEach(function (e) { e.removeAttribute('onclick'); e.removeAttribute('onerror'); e.removeAttribute('onload'); });
+    return temp.innerHTML;
+  }
   fetch('/api/content').then(function (r) { return r.json(); }).then(function (d) {
     var icon = (d.content || {}).UserIcon;
-    if (icon) document.getElementById('topbarUserIcon').innerHTML = icon;
+    if (icon) document.getElementById('topbarUserIcon').innerHTML = sanitizeHtml(icon);
   }).catch(function () {});
 
   function csrfToken() {
@@ -384,9 +433,10 @@
       <div class="seg" id="viewSeg">
         <button data-view="tasks" class="on" data-content="Admin-ViewTasks">Tasks</button>
         <button data-view="log" data-content="Admin-ViewLog">Activity log</button>
+        <button data-view="queue">Queue</button>
       </div>
 
-      <div class="field">
+      <div class="field" data-queue-hidden>
         <label for="groupBy" data-content="Admin-GroupBy">Group by</label>
         <select id="groupBy">
           <option value="project">Project</option>
@@ -399,7 +449,7 @@
         </select>
       </div>
 
-      <div class="field">
+      <div class="field" data-queue-hidden>
         <label for="period" data-content="Admin-Period">Period</label>
         <select id="period">
           <option value="all">All time</option>
@@ -409,29 +459,29 @@
         </select>
       </div>
 
-      <div class="field" data-only="tasks">
+      <div class="field" data-only="tasks" data-queue-hidden>
         <label for="fProject" data-content="Admin-Project">Project</label>
         <select id="fProject"><option value="">All</option></select>
       </div>
-      <div class="field" data-only="tasks">
+      <div class="field" data-only="tasks" data-queue-hidden>
         <label for="fUser" data-content="Admin-User">User</label>
         <select id="fUser"><option value="">All</option></select>
       </div>
-      <div class="field" data-only="tasks">
+      <div class="field" data-only="tasks" data-queue-hidden>
         <label for="fStatus" data-content="Admin-Status">Status</label>
         <select id="fStatus"><option value="">All</option></select>
       </div>
-      <div class="field" data-only="tasks">
+      <div class="field" data-only="tasks" data-queue-hidden>
         <label for="fPriority" data-content="Admin-Priority">Priority</label>
         <select id="fPriority"><option value="">All</option></select>
       </div>
 
-      <div class="field">
+      <div class="field" data-queue-hidden>
         <label for="q" data-content="Admin-Search">Search</label>
         <input type="search" id="q" data-content-ph="Admin-SearchPh" placeholder="name, id, user…">
       </div>
 
-      <div class="exports">
+      <div class="exports" data-queue-hidden>
         <button class="btn primary" id="btnPrint" data-content="Admin-Print">🖨 Print / PDF</button>
         <button class="btn" data-fmt="md" title="Text report — headings + tables, human-readable and parser-friendly (Markdown)" data-content="Admin-Report">Report</button>
         <button class="btn" data-fmt="csv">CSV</button>
@@ -447,6 +497,37 @@
 
   <section class="panel">
     <div id="report"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="panel no-print import-panel" id="bulkImportPanel">
+    <div class="import-head">
+      <div>
+        <h2>Bulk import tasks</h2>
+        <p class="import-note">Paste pure JSON, review it as a table, assign people and deadlines, then send selected rows directly to individual sheets. This admin action skips the approval queue.</p>
+      </div>
+      <button class="btn" id="importExample" type="button">Load example</button>
+    </div>
+    <textarea class="import-json" id="importJson" spellcheck="false" aria-label="Bulk task JSON" placeholder='[{"project":"Vihaara 14","name":"Poster design","assignee":"Jois","deadline":"2026-07-25T18:30"}]'></textarea>
+    <div class="import-tools">
+      <button class="btn primary" id="importPreview" type="button">Build table</button>
+      <div class="field"><label for="importBulkUser">Assignee</label><select id="importBulkUser"><option value="">Choose…</option></select></div>
+      <button class="btn" id="importUserAll" type="button">Apply to all</button>
+      <button class="btn" id="importUserSelected" type="button">Apply to selected</button>
+      <div class="field"><label for="importBulkDeadline">Deadline</label><input id="importBulkDeadline" type="datetime-local"></div>
+      <button class="btn" id="importDeadlineAll" type="button">Apply to all</button>
+      <button class="btn" id="importDeadlineSelected" type="button">Apply to selected</button>
+    </div>
+    <div class="import-table-wrap" id="importTableWrap" style="display:none">
+      <table class="import-table">
+        <thead><tr><th><input id="importSelectAll" type="checkbox" checked aria-label="Select all import rows"></th><th>#</th><th>Decision</th><th>Project</th><th>Task</th><th>Assignee</th><th>Deadline</th><th>Status</th><th>Priority</th><th>Notes / reason</th></tr></thead>
+        <tbody id="importRows"></tbody>
+      </table>
+    </div>
+    <div class="import-tools">
+      <button class="btn primary" id="importCommit" type="button" disabled>Import selected directly</button>
+      <span id="importCount" class="dz-info"></span>
+    </div>
+    <div class="import-result" id="importResult"></div>
   </section>
 
   <section class="panel no-print danger-zone" style="display:none">
@@ -472,7 +553,7 @@ const $ = (id) => document.getElementById(id);
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-const state = { view:'tasks', data:null, rows:[], meta:{} };
+const state = { view:'tasks', data:null, rows:[], meta:{}, importRows:[], queueItems:[], queueLoading:false, queueError:'', queueErrors:{}, queueSelected:{} };
 
 // --- ISO week (matches server) ---
 function isoWeek(d) {
@@ -504,13 +585,20 @@ async function load() {
   }
   // Confirmed admin: reveal the reset danger zone.
   const dz = document.querySelector('.danger-zone'); if (dz) dz.style.display = '';
+  $('bulkImportPanel').style.display = '';
   state.data = d;
   state.meta = d;
   $('who').textContent = d.admin + (d.stale ? ' · data may be stale' : '');
   // Topbar role/sign-out is the shared component (middleware/shared/topbar.js)
   // — it fetches /api/session itself, nothing to wire here.
   buildFilterOptions();
+  buildImportOptions();
   render();
+}
+
+function buildImportOptions() {
+  const users = (state.data && state.data.users) || [];
+  $('importBulkUser').innerHTML = '<option value="">Choose…</option>' + users.map((u) => `<option value="${esc(u.userSheet)}">${esc(u.name)}</option>`).join('');
 }
 
 function activeRows() {
@@ -596,8 +684,15 @@ function grouped(rows, by) {
 
 // --- render ---
 function render() {
+  const isQueue = state.view === 'queue';
+  document.querySelectorAll('[data-queue-hidden]').forEach((el) => { el.style.display = isQueue ? 'none' : ''; });
   // toggle task-only filters when in log view
   document.querySelectorAll('[data-only="tasks"]').forEach((el) => { el.style.display = state.view === 'tasks' ? '' : 'none'; });
+
+  if (isQueue) {
+    renderQueue();
+    return;
+  }
 
   const rows = filtered();
   state.rows = rows;
@@ -631,6 +726,345 @@ function taskTable(rows) {
       <td>${esc(r.assignedDate || '—')}</td>
       <td>${esc(r.deadline || '—')}</td>
     </tr>`).join('') + '</tbody></table>';
+}
+
+function renderQueue() {
+  const host = $('report');
+  const items = state.queueItems || [];
+  state.rows = [];
+  $('cards').innerHTML = `<div class="card"><div class="n">${items.length}</div><div class="k">Waiting for review</div></div>`;
+  $('reportMeta').innerHTML = '<h1>Param Culture — Queue</h1>'
+    + `<div class="sub">${items.length} queued ${items.length === 1 ? 'item' : 'items'}</div>`;
+  if (state.queueLoading) { host.innerHTML = '<div class="empty">Loading queue…</div>'; return; }
+  if (state.queueError) { host.innerHTML = `<div class="empty">Could not load the queue: ${esc(state.queueError)}</div>`; return; }
+  if (!items.length) { host.innerHTML = '<div class="empty">Queue is empty — nothing waiting for approval.</div>'; return; }
+
+  const selectedCount = Object.values(state.queueSelected || {}).filter(Boolean).length;
+  const projectErrors = items.filter((i) => (state.queueErrors[String(i.row)] || '').includes('project not matched'));
+
+  host.innerHTML = `
+    <div class="queue-header">
+      <div class="queue-bulk">
+        ${selectedCount > 0 ? `
+          <div class="bulk-actions">
+            <span class="selected-count">${selectedCount} selected</span>
+            <button class="btn primary" id="bulkApprove" data-bulk-action="real">Bulk Approve</button>
+            <button class="btn routine" id="bulkRoutine" data-bulk-action="routine">Bulk Routine</button>
+            <button class="btn silly" id="bulkSilly" data-bulk-action="silly">Bulk Silly</button>
+            <button class="btn danger" id="bulkReject" data-bulk-action="reject">Bulk Reject</button>
+            <button class="btn secondary" id="bulkClear">Clear</button>
+          </div>
+        ` : ''}
+      </div>
+      ${projectErrors.length > 0 ? `
+        <div class="project-errors">
+          <div class="error-label">⚠ ${projectErrors.length} item${projectErrors.length === 1 ? '' : 's'} with project errors</div>
+          <div class="resolve-projects">
+            <button class="btn secondary" id="resolveProjects">Resolve Project Errors</button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+    <table><thead><tr>
+      <th style="width:40px"><input type="checkbox" id="selectAll" class="queue-select-all"></th>
+      <th>Task</th><th>Submitted by</th><th>Decision</th></tr></thead><tbody>${items.map((item) => `
+    <tr data-queue-row="${Number(item.row)}" class="${state.queueSelected && state.queueSelected[String(item.row)] ? 'selected' : ''}">
+      <td><input type="checkbox" class="queue-item-check" data-queue-row="${Number(item.row)}" ${state.queueSelected && state.queueSelected[String(item.row)] ? 'checked' : ''}></td>
+      <td><div class="queue-task">${esc(item.name || 'Untitled task')}</div>
+        ${item.fields && item.fields.description ? `<div class="queue-description">${esc(item.fields.description)}</div>` : ''}
+        <div class="queue-meta">${esc(item.project || 'No project')} · ${esc(item.received || item.reportDate || '')}</div>
+        ${state.queueErrors[String(item.row)] ? `<div class="queue-error">${esc(state.queueErrors[String(item.row)])}</div>` : ''}</td>
+      <td>${esc(item.reporter || '—')}</td>
+      <td><div class="queue-actions">
+        <button class="btn primary" data-queue-action="real" data-queue-row="${Number(item.row)}">Approve</button>
+        <button class="btn routine" data-queue-action="routine" data-queue-row="${Number(item.row)}">Routine</button>
+        <button class="btn silly" data-queue-action="silly" data-queue-row="${Number(item.row)}">Silly</button>
+        <button class="btn danger" data-queue-action="reject" data-queue-row="${Number(item.row)}">Reject</button>
+      </div></td>
+    </tr>`).join('')}</tbody></table>`;
+
+  // Attach event listeners after rendering
+  document.getElementById('selectAll')?.addEventListener('change', (e) => {
+    state.queueSelected = state.queueSelected || {};
+    items.forEach((item) => {
+      state.queueSelected[String(item.row)] = e.target.checked;
+    });
+    render();
+  });
+
+  document.querySelectorAll('.queue-item-check').forEach((checkbox) => {
+    checkbox.addEventListener('change', (e) => {
+      state.queueSelected = state.queueSelected || {};
+      state.queueSelected[String(e.target.dataset.queueRow)] = e.target.checked;
+      render();
+    });
+  });
+
+  document.getElementById('bulkApprove')?.addEventListener('click', () => bulkDecide('real'));
+  document.getElementById('bulkRoutine')?.addEventListener('click', () => bulkDecide('routine'));
+  document.getElementById('bulkSilly')?.addEventListener('click', () => bulkDecide('silly'));
+  document.getElementById('bulkReject')?.addEventListener('click', () => bulkDecide('reject'));
+  document.getElementById('bulkClear')?.addEventListener('click', () => { state.queueSelected = {}; render(); });
+  document.getElementById('resolveProjects')?.addEventListener('click', showProjectResolver);
+}
+
+function csrf() {
+  const m = document.cookie.match(/(?:^|; )ts2_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+async function loadQueue() {
+  state.queueLoading = true; state.queueError = '';
+  render();
+  try {
+    const r = await fetch('/api/admin/queue', { credentials:'same-origin' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'load failed');
+    state.queueItems = d.items || [];
+  } catch (e) {
+    state.queueError = e.message || String(e);
+  } finally {
+    state.queueLoading = false;
+    render();
+  }
+}
+
+async function decideQueue(row, tag) {
+  delete state.queueErrors[String(row)];
+  const buttons = document.querySelectorAll(`[data-queue-row="${Number(row)}"] button`);
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const r = await fetch('/api/admin/queue/decide', {
+      method:'POST', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json', 'x-csrf-token':csrf() },
+      body:JSON.stringify({ decisions:[{ row:Number(row), tag }] }),
+    });
+    const d = await r.json();
+    const result = (d.results || []).find((entry) => Number(entry.row) === Number(row));
+    if (!d.ok || !result || !result.ok) {
+      state.queueErrors[String(row)] = (result && result.error) || d.error || d.message || 'decision failed';
+      render();
+      return;
+    }
+    await loadQueue();
+  } catch (e) {
+    state.queueErrors[String(row)] = e.message || String(e);
+    buttons.forEach((button) => { button.disabled = false; });
+    render();
+  }
+}
+
+// Floating progress banner shown during any long bulk/sequential operation so
+// the page never looks frozen while the slow sheet bridge works.
+function showProgressBanner(text) {
+  let el = document.getElementById('bulkProgress');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'bulkProgress';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#2f5233;color:#fff;'
+      + 'padding:12px 18px;font-size:14px;font-weight:600;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = text;
+  return el;
+}
+function hideProgressBanner() {
+  const el = document.getElementById('bulkProgress');
+  if (el) el.remove();
+}
+
+async function bulkDecide(tag) {
+  const selected = Object.entries(state.queueSelected || {})
+    .filter(([_, checked]) => checked)
+    .map(([row]) => ({ row: Number(row), tag }));
+
+  if (!selected.length) return;
+
+  document.querySelectorAll('.queue-actions button, .bulk-actions button').forEach((b) => { b.disabled = true; });
+
+  const label = { real: 'Approving', routine: 'Marking routine', silly: 'Filing as silly', reject: 'Rejecting' }[tag] || 'Processing';
+  let done = 0;
+  let failed = 0;
+
+  // Sequential, one request per item: the sheet bridge is slow (~20-30s each)
+  // and a single batched request can exceed the proxy idle timeout. This also
+  // lets us show real progress instead of a frozen-looking page.
+  for (let i = 0; i < selected.length; i += 1) {
+    const d = selected[i];
+    showProgressBanner(`${label} ${i + 1} of ${selected.length}… this can take ~30s each, please wait.`);
+    try {
+      const r = await fetch('/api/admin/queue/decide', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+        body: JSON.stringify({ decisions: [d] }),
+      });
+      const out = await r.json();
+      const result = (out.results || [])[0];
+      if (result && result.ok) {
+        done += 1;
+      } else {
+        failed += 1;
+        state.queueErrors[String(d.row)] = (result && result.error) || out.error || 'decision failed';
+      }
+    } catch (e) {
+      failed += 1;
+      state.queueErrors[String(d.row)] = e.message || String(e);
+    }
+  }
+
+  showProgressBanner(`Done — ${done} processed${failed ? `, ${failed} failed (see red notes below)` : ''}. Refreshing…`);
+  state.queueSelected = {};
+  await loadQueue();
+  setTimeout(hideProgressBanner, failed ? 4000 : 1500);
+}
+
+function showProjectResolver() {
+  const items = state.queueItems || [];
+  const projects = (state.data && state.data.projects) || [];
+  const projectErrors = items.filter((i) => {
+    const err = state.queueErrors[String(i.row)] || '';
+    return err.includes('project not matched');
+  });
+
+  if (!projectErrors.length) {
+    alert('No project errors to resolve.');
+    return;
+  }
+
+  const projectMap = {};
+  projectErrors.forEach((item) => {
+    const match = (state.queueErrors[String(item.row)] || '').match(/project not matched:\s*(.+)$/);
+    if (match) {
+      const proj = match[1].trim();
+      if (!projectMap[proj]) projectMap[proj] = [];
+      projectMap[proj].push(item.row);
+    }
+  });
+
+  let html = '<div style="padding:20px; max-height:80vh; overflow:auto;">';
+  html += '<h3>Resolve Project Errors</h3>';
+  html += '<p>Pick the correct project from the list:</p>';
+
+  Object.entries(projectMap).forEach(([unmatchedProj, rows]) => {
+    html += `<div style="margin:15px 0; padding:10px; background:#f5f5f5; border-radius:4px;">`;
+    html += `<label style="display:block; margin-bottom:8px; font-weight:bold;">
+      "${esc(unmatchedProj)}" (${rows.length} item${rows.length === 1 ? '' : 's'})
+    </label>`;
+
+    if (projects.length > 0) {
+      html += `<select class="project-resolver-select" data-unmatched="${esc(unmatchedProj)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px; margin-bottom:6px;">`;
+      html += `<option value="">Choose project…</option>`;
+      projects.forEach((p) => {
+        html += `<option value="${esc(p.code)}" data-label="${esc(p.label || p.name)}">
+          ${esc(p.label || p.name)} (${p.code})
+        </option>`;
+      });
+      html += `</select>`;
+      html += `<div style="font-size:11px; color:#666;">Rows: ${rows.join(', ')}</div>`;
+    } else {
+      html += `<div style="color:#b3261e; font-size:13px;">No projects available. Add projects to the master sheet first.</div>`;
+    }
+
+    html += '</div>';
+  });
+
+  html += `<div id="resolveStatus" style="margin:14px 0 0; font-size:13px; color:#555; min-height:18px;"></div>`;
+  html += `<div style="margin-top:16px;">
+    <button class="btn primary" id="applyProjectMappings" style="margin-right:10px;">Apply & Retry</button>
+    <button class="btn secondary" id="resolveCancel">Cancel</button>
+  </div>`;
+  html += '</div>';
+
+  const dialog = document.createElement('dialog');
+  dialog.innerHTML = html;
+  dialog.style.padding = '0';
+  dialog.style.borderRadius = '8px';
+  dialog.style.maxWidth = '600px';
+  document.body.appendChild(dialog);
+  dialog.showModal();
+
+  const cancelBtn = document.getElementById('resolveCancel');
+  cancelBtn.addEventListener('click', () => { dialog.close(); dialog.remove(); });
+
+  document.getElementById('applyProjectMappings').addEventListener('click', async () => {
+    const resolved = {};
+    document.querySelectorAll('.project-resolver-select').forEach((select) => {
+      const unmatchedProj = select.dataset.unmatched;
+      const code = select.value;
+      const label = select.options[select.selectedIndex].dataset.label;
+      if (code) {
+        resolved[unmatchedProj] = { code, label };
+      }
+    });
+
+    if (!Object.keys(resolved).length) {
+      alert('Please select projects for all unmatched items.');
+      return;
+    }
+
+    await retryWithResolvedProjects(resolved, dialog);
+  });
+}
+
+async function retryWithResolvedProjects(resolved, dialog) {
+  const items = state.queueItems || [];
+  const projectErrors = items.filter((i) => {
+    const err = state.queueErrors[String(i.row)] || '';
+    return err.includes('project not matched');
+  });
+
+  // One decision per errored item, mapped to its resolved project code.
+  const decisions = projectErrors.map((item) => {
+    const match = (state.queueErrors[String(item.row)] || '').match(/project not matched:\s*(.+)$/);
+    const unmatchedProj = match ? match[1].trim() : null;
+    const resolution = unmatchedProj ? resolved[unmatchedProj] : null;
+    return {
+      row: Number(item.row),
+      tag: 'real',
+      project: resolution ? resolution.code : undefined,
+    };
+  }).filter((d) => d.project);
+
+  const status = dialog && dialog.querySelector('#resolveStatus');
+  const applyBtn = dialog && dialog.querySelector('#applyProjectMappings');
+  const cancelBtn = dialog && dialog.querySelector('#resolveCancel');
+  if (applyBtn) applyBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  document.querySelectorAll('.queue-actions button').forEach((b) => { b.disabled = true; });
+
+  let done = 0;
+  let failed = 0;
+  // Process ONE AT A TIME: the sheet bridge is slow (~20-30s each), and a single
+  // batch request can exceed the proxy's idle timeout. Sequential keeps each
+  // request short and lets us show progress.
+  for (let i = 0; i < decisions.length; i += 1) {
+    const d = decisions[i];
+    if (status) status.innerHTML = `Creating task ${i + 1} of ${decisions.length}… <b>this can take ~30 seconds each</b>, please wait.`;
+    try {
+      const r = await fetch('/api/admin/queue/decide', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+        body: JSON.stringify({ decisions: [d] }),
+      });
+      const out = await r.json();
+      const result = (out.results || [])[0];
+      if (result && result.ok) {
+        done += 1;
+      } else {
+        failed += 1;
+        state.queueErrors[String(d.row)] = (result && result.error) || out.error || 'decision failed';
+      }
+    } catch (e) {
+      failed += 1;
+      state.queueErrors[String(d.row)] = e.message || String(e);
+    }
+  }
+
+  if (status) status.innerHTML = `Done — created ${done}${failed ? `, failed ${failed}` : ''}. Refreshing…`;
+  state.queueSelected = {};
+  await loadQueue();
+  if (dialog) { try { dialog.close(); dialog.remove(); } catch (e) { /* already gone */ } }
 }
 function logTable(rows) {
   return `<table><thead><tr>
@@ -770,13 +1204,18 @@ $('viewSeg').addEventListener('click', (e) => {
   // sensible default grouping per view
   $('groupBy').value = state.view === 'log' ? 'user' : 'project';
   render();
+  if (state.view === 'queue') loadQueue();
+});
+$('report').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-queue-action]'); if (!b) return;
+  decideQueue(b.dataset.queueRow, b.dataset.queueAction);
 });
 ['groupBy','period','fProject','fUser','fStatus','fPriority'].forEach((id) => $(id).addEventListener('change', render));
 $('q').addEventListener('input', render);
 $('btnPrint').addEventListener('click', () => window.print());
 // The shared topbar's "Sign in" only fires an event; login lives on the
 // dashboard, so send the user there (they return via the Admin button).
-document.addEventListener('topbar:signin-click', () => { window.location.href = 'index.html'; });
+document.addEventListener('topbar:signin-click', () => { window.location.href = '/'; });
 
 // Page copy comes from the master content tab (data-content / data-content-ph);
 // the hardcoded text is the fallback until a key is filled in the sheet.
@@ -802,6 +1241,125 @@ document.querySelectorAll('[data-fmt]').forEach((b) => b.addEventListener('click
 }));
 
 load();
+
+// ---- Admin direct bulk import -------------------------------------------
+(function () {
+  const json = $('importJson'), result = $('importResult'), commit = $('importCommit');
+  const rowsHost = $('importRows'), wrap = $('importTableWrap'), count = $('importCount');
+  const example = [{ project:'Vihaara 14', name:'Poster design', description:'Two language variants', assignee:'Jois', deadline:'2026-07-25T18:30', priority:'Medium', notes:'' }];
+
+  function sourceRows() {
+    return state.importRows.map((row, i) => {
+      const tr = rowsHost.querySelector(`tr[data-row="${i}"]`);
+      if (!tr) return row;
+      return {
+        clientRowId: row.clientRowId,
+        projectAlias: row.projectAlias,
+        adminAction: tr.querySelector('[data-f="action"]').value,
+        matchTaskId: row.matchTaskId || '',
+        selected: tr.querySelector('[data-f="selected"]').checked,
+        projectCode: tr.querySelector('[data-f="projectCode"]').value,
+        name: tr.querySelector('[data-f="name"]').value.trim(),
+        assignee: tr.querySelector('[data-f="assignee"]').value,
+        deadline: tr.querySelector('[data-f="deadline"]').value,
+        priority: tr.querySelector('[data-f="priority"]').value,
+        status: tr.querySelector('[data-f="status"]').value,
+        description: row.description || '', notes: tr.querySelector('[data-f="notes"]').value.trim(), link: row.link || '',
+      };
+    });
+  }
+
+  function optionList(items, valueKey, labelKey, selected) {
+    return '<option value="">Choose…</option>' + (items || []).map((item) =>
+      `<option value="${esc(item[valueKey])}"${item[valueKey] === selected ? ' selected' : ''}>${esc(item[labelKey])}</option>`).join('');
+  }
+
+  function sheetToInput(value) {
+    const m = /^(\d{2})-([A-Za-z]{3})\s*\|\s*(\d{2}):(\d{2})$/.exec(value || '');
+    if (!m) return value || '';
+    const mi = MONTHS.map((x) => x.toLowerCase()).indexOf(m[2].toLowerCase()) + 1;
+    return mi ? `${new Date().getFullYear()}-${String(mi).padStart(2,'0')}-${m[1]}T${m[3]}:${m[4]}` : value;
+  }
+
+  function drawImportTable() {
+    const projects = (state.data && state.data.projects) || [];
+    const users = (state.data && state.data.users) || [];
+    rowsHost.innerHTML = state.importRows.map((row, i) => `<tr data-row="${i}" class="${row.valid && !['filtered','review'].includes(row.action) ? '' : 'bad'}">
+      <td><input type="checkbox" data-f="selected" ${row.selected ? 'checked' : ''} aria-label="Select row ${row.row}"></td>
+      <td>${row.row}</td>
+      <td><select data-f="action">${['new','update','filtered'].map((p) => `<option${p === row.action ? ' selected' : ''}>${p}</option>`).join('')}</select>${row.matchTaskId ? `<br><span class="tid">${esc(row.matchTaskId)}</span>` : ''}</td>
+      <td><select data-f="projectCode">${optionList(projects, 'code', 'label', row.projectCode)}</select></td>
+      <td><input data-f="name" value="${esc(row.name)}" maxlength="200"></td>
+      <td><select data-f="assignee">${optionList(users, 'userSheet', 'name', row.assignee)}</select></td>
+      <td><input data-f="deadline" type="datetime-local" value="${esc(sheetToInput(row.deadline))}"></td>
+      <td><select data-f="status">${['Assigned','Ongoing','Completed','Approved'].map((p) => `<option${p === row.status ? ' selected' : ''}>${p}</option>`).join('')}</select></td>
+      <td><select data-f="priority">${['High','Medium','Low'].map((p) => `<option${p === row.priority ? ' selected' : ''}>${p}</option>`).join('')}</select></td>
+      <td><input data-f="notes" value="${esc(row.notes)}" maxlength="4000"><span class="row-error">${esc((row.errors || []).join('; ') || row.reason || '')}</span></td>
+    </tr>`).join('');
+    wrap.style.display = state.importRows.length ? '' : 'none';
+    updateCount();
+  }
+
+  function updateCount() {
+    const boxes = rowsHost.querySelectorAll('[data-f="selected"]');
+    const selected = Array.from(boxes).filter((b) => b.checked).length;
+    count.textContent = `${selected} of ${boxes.length} selected`;
+    commit.disabled = selected === 0;
+    $('importSelectAll').checked = boxes.length > 0 && selected === boxes.length;
+  }
+
+  async function serverPreview(rows) {
+    const r = await fetch('/api/admin/import/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ tasks:rows }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'could not validate import');
+    return d;
+  }
+
+  $('importExample').addEventListener('click', () => { json.value = JSON.stringify(example, null, 2); result.textContent = ''; });
+  $('importPreview').addEventListener('click', async () => {
+    result.className = 'import-result'; result.textContent = 'Checking JSON…';
+    try {
+      const parsed = JSON.parse(json.value || '[]');
+      const d = await serverPreview(Array.isArray(parsed) ? parsed : parsed.tasks);
+      state.importRows = d.rows;
+      drawImportTable();
+      result.textContent = `${d.valid} of ${d.rows.length} row(s) ready. Fix highlighted rows before importing them.`;
+    } catch (e) { result.className = 'import-result bad'; result.textContent = e.message || 'Invalid JSON.'; }
+  });
+
+  function apply(field, value, selectedOnly) {
+    rowsHost.querySelectorAll('tr[data-row]').forEach((tr) => {
+      if (selectedOnly && !tr.querySelector('[data-f="selected"]').checked) return;
+      tr.querySelector(`[data-f="${field}"]`).value = value;
+    });
+  }
+  $('importUserAll').addEventListener('click', () => apply('assignee', $('importBulkUser').value, false));
+  $('importUserSelected').addEventListener('click', () => apply('assignee', $('importBulkUser').value, true));
+  $('importDeadlineAll').addEventListener('click', () => apply('deadline', $('importBulkDeadline').value, false));
+  $('importDeadlineSelected').addEventListener('click', () => apply('deadline', $('importBulkDeadline').value, true));
+  $('importSelectAll').addEventListener('change', (e) => { rowsHost.querySelectorAll('[data-f="selected"]').forEach((b) => { b.checked = e.target.checked; }); updateCount(); });
+  rowsHost.addEventListener('change', updateCount);
+
+  commit.addEventListener('click', async () => {
+    commit.disabled = true; result.className = 'import-result'; result.textContent = 'Validating selected rows…';
+    try {
+      const checked = await serverPreview(sourceRows());
+      state.importRows = checked.rows;
+      drawImportTable();
+      const invalidSelected = checked.rows.filter((r) => r.selected && (!r.valid || ['filtered','duplicate','review'].includes(r.action)));
+      if (invalidSelected.length) throw new Error(`${invalidSelected.length} selected row(s) still need attention.`);
+      const batchId = `admin-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      result.textContent = 'Writing selected tasks to individual sheets…';
+      const response = await fetch('/api/admin/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ batchId, tasks:checked.rows }) });
+      const out = await response.json();
+      if (!response.ok && response.status !== 207) throw new Error(out.error || 'import failed');
+      const failures = (out.results || []).filter((r) => !r.ok);
+      result.className = failures.length ? 'import-result bad' : 'import-result ok';
+      result.textContent = `Created ${out.created}, failed ${out.failed}.` + (failures.length ? '\n' + failures.map((f) => `Row ${f.row}: ${(f.errors || []).join('; ')}`).join('\n') : ' Tasks were sent directly to individual sheets.');
+      if (!failures.length) { state.importRows = []; rowsHost.innerHTML = ''; wrap.style.display = 'none'; json.value = ''; updateCount(); await load(); }
+    } catch (e) { result.className = 'import-result bad'; result.textContent = e.message || 'Import failed.'; updateCount(); }
+  });
+})();
 
 // ---- Task reset (danger zone) --------------------------------------------
 // Two steps: preview (dry run, writes nothing) reveals the confirm row; then
