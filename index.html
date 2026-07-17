@@ -1295,8 +1295,9 @@
       }
     });
     $('eDeadline').value = task.endDate || '';
-    // Classifier: only P3/P4 can see/change
-    $('eClassifierWrap').hidden = state.profile < 3;
+    // Classifier: ADMIN-ONLY (Vinod, 17-Jul) — invisible to every other
+    // profile; nobody below P4 should even know this field exists.
+    $('eClassifierWrap').hidden = state.profile < 4;
     $('eClassifier').value = task.classifier || '';
     $('eRevNote').value = '';
     $('eRevNoteWrap').hidden = $('eStatus').value !== 'Revision';
