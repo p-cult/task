@@ -1287,7 +1287,7 @@
       const el = $(id);
       el.disabled = modOnly;
       if (modOnly) {
-        el.setAttribute('aria-label', 'Locked for moderators (can only approve and classify)');
+        el.setAttribute('aria-label', 'Locked for moderators (status is the only editable field)');
         el.classList.add('locked-by-role');
       } else {
         el.removeAttribute('aria-label');
