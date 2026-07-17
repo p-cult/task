@@ -647,7 +647,7 @@
   }
   document.getElementById('topbarSignout').addEventListener('click', function () {
     fetch('/api/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken() } })
-      .then(function () { window.location.href = '/'; });
+      .then(function () { window.location.href = 'index.html'; });
   });
   document.getElementById('topbarSignin').addEventListener('click', function () {
     document.dispatchEvent(new CustomEvent('topbar:signin-click'));
@@ -877,15 +877,10 @@
         <label data-content="Edit-Status">Status</label>
         <select id="eStatus"><!-- options built from the content tab (Status-Options) --></select>
       </div>
-      <div id="eClassifierWrap" hidden>
-        <label data-content="Edit-Classifier">Classification</label>
-        <select id="eClassifier">
-          <option value="">—Clear—</option>
-          <option value="silly">Silly (hidden)</option>
-          <option value="routine">Routine (logged only)</option>
-          <option value="other">Other (logged only)</option>
-        </select>
-      </div>
+      <!-- Admin-only control; built at runtime from the P4 session payload.
+           Deliberately EMPTY in source — its vocabulary must not appear in
+           the page anyone can view-source (charter, 17-Jul). -->
+      <div id="eClassifierWrap" hidden></div>
       <div class="full" id="eRevNoteWrap" hidden>
         <label data-content="Edit-RevNote">Revision note (why is it going back?)</label>
         <textarea id="eRevNote"></textarea>
@@ -1024,6 +1019,8 @@
     state.profile = s.profile || 1;
     state.displayName = s.displayName || '';
     state.username = s.username || '';
+    // Admin-only classification vocabulary — present ONLY in P4 sessions.
+    state.classifierMeta = s.classifier || null;
     const loggedIn = s.profile > 1;
     // inline profile-gated controls (Admin link only now)
     document.querySelectorAll('[data-min-profile-inline]').forEach((el) => {
@@ -1296,9 +1293,29 @@
     });
     $('eDeadline').value = task.endDate || '';
     // Classifier: ADMIN-ONLY (Vinod, 17-Jul) — invisible to every other
-    // profile; nobody below P4 should even know this field exists.
-    $('eClassifierWrap').hidden = state.profile < 4;
-    $('eClassifier').value = task.classifier || '';
+    // profile; nobody below P4 should even know this field exists. The
+    // control (label + options) is built here from the P4 session payload,
+    // so its vocabulary never ships in the page source.
+    const cwrap = $('eClassifierWrap');
+    if (state.profile >= 4 && state.classifierMeta) {
+      if (!$('eClassifier')) {
+        const lab = document.createElement('label');
+        lab.textContent = state.classifierMeta.label || 'Classification';
+        const sel = document.createElement('select');
+        sel.id = 'eClassifier';
+        (state.classifierMeta.options || []).forEach((o) => {
+          const opt = document.createElement('option');
+          opt.value = o.value; opt.textContent = o.label;
+          sel.appendChild(opt);
+        });
+        cwrap.appendChild(lab);
+        cwrap.appendChild(sel);
+      }
+      $('eClassifier').value = task.classifier || '';
+      cwrap.hidden = false;
+    } else {
+      cwrap.hidden = true;
+    }
     $('eRevNote').value = '';
     $('eRevNoteWrap').hidden = $('eStatus').value !== 'Revision';
     $('editResult').textContent = '';
@@ -1395,11 +1412,24 @@
   $('loginCancel').addEventListener('click', () => dlg.close());
   $('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const r = await postJson('/api/login', { username: $('lu').value, password: $('lp').value });
-    if (!r.ok) { $('loginErr').textContent = 'Wrong username or password.'; return; }
-    dlg.close();
-    if (window.topbarRefresh) window.topbarRefresh();
-    await refreshSession();
+    // Guard against double-submit (Enter mashing self-inflicts the server's
+    // login rate limit) and network errors (previously an unhandled rejection
+    // that left the dialog open with no message).
+    const loginBtn = $('loginForm').querySelector('button[type="submit"]');
+    if (loginBtn.disabled) return;
+    loginBtn.disabled = true;
+    try {
+      const r = await postJson('/api/login', { username: $('lu').value, password: $('lp').value });
+      if (!r.ok) { $('loginErr').textContent = 'Wrong username or password.'; return; }
+      $('lp').value = '';
+      dlg.close();
+      if (window.topbarRefresh) window.topbarRefresh();
+      await refreshSession();
+    } catch (err) {
+      $('loginErr').textContent = 'Could not reach the server.';
+    } finally {
+      loginBtn.disabled = false;
+    }
   });
 
   // forgot password dialog
@@ -1414,6 +1444,10 @@
     $('fpStep1').style.display = 'block';
     $('fpStep2').style.display = 'none';
     $('fpStep3').style.display = 'none';
+    // Re-enable both action buttons: a prior successful reset leaves Verify
+    // disabled forever (audit R20) — same disease as the edit-Save bug.
+    $('fpRequestBtn').disabled = false;
+    $('fpVerifyBtn').disabled = false;
     fpDlg.showModal();
   });
 
@@ -1490,6 +1524,9 @@
   // for approval; admin (P4) creates land directly.
   $('newTaskBtn').addEventListener('click', () => {
     $('newResult').textContent = ''; $('newResult').className = 'new-result';
+    // Re-enable Create: a prior submit that threw (network error, non-JSON
+    // 502) left the button disabled with nothing to revive it (audit R20).
+    $('newForm').querySelector('button[type="submit"]').disabled = false;
     fillProjectDropdown(); applyPrefill(); newDlg.showModal();
   });
   $('newCancel').addEventListener('click', () => newDlg.close());
@@ -1505,21 +1542,30 @@
     const out = $('newResult');
     const submit = $('newForm').querySelector('button[type="submit"]');
     submit.disabled = true;
-    const r = await postJson('/api/tasks', {
-      projectCode: $('nProject').value, name: $('nName').value.trim(),
-      description: $('nDesc').value.trim(), notes: $('nNotes').value.trim(),
-      priority: $('nPriority').value, deadline: $('nDeadline').value.trim(),
-    });
-    const d = await r.json();
-    if (d.ok) {
-      out.className = 'new-result ok';
-      out.textContent = d.message || 'Task created.';
-      $('newForm').reset();
-      await loadBoard();
-      newDlg.close();
-    } else {
+    try {
+      const r = await postJson('/api/tasks', {
+        projectCode: $('nProject').value, name: $('nName').value.trim(),
+        description: $('nDesc').value.trim(), notes: $('nNotes').value.trim(),
+        priority: $('nPriority').value, deadline: $('nDeadline').value.trim(),
+      });
+      let d = {};
+      try { d = await r.json(); } catch (err) { d = {}; }
+      if (d.ok) {
+        out.className = 'new-result ok';
+        out.textContent = d.message || 'Task created.';
+        $('newForm').reset();
+        await loadBoard();
+        newDlg.close();
+      } else {
+        out.className = 'new-result bad';
+        out.textContent = d.error || 'Could not create task.';
+        submit.disabled = false;
+      }
+    } catch (err) {
+      // Network failure previously threw with the button already disabled and
+      // nothing to re-enable it — a permanently dead Create button (audit R20).
       out.className = 'new-result bad';
-      out.textContent = d.error || 'Could not create task.';
+      out.textContent = 'Could not reach the server.';
       submit.disabled = false;
     }
   });
@@ -1557,7 +1603,7 @@
     if (!$('eNotes').disabled) body.notes = $('eNotes').value.trim();
     if (!$('ePriority').disabled) body.priority = $('ePriority').value;
     if (!$('eStatus').disabled) body.status = $('eStatus').value;
-    if (!$('eClassifierWrap').hidden) body.classifier = $('eClassifier').value;
+    if (!$('eClassifierWrap').hidden && $('eClassifier')) body.classifier = $('eClassifier').value;
     if (!$('eDeadline').disabled) body.deadline = $('eDeadline').value.trim();
     if (body.name !== undefined && !body.name) {
       out.className = 'new-result bad';

@@ -395,7 +395,7 @@
   }
   document.getElementById('topbarSignout').addEventListener('click', function () {
     fetch('/api/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken() } })
-      .then(function () { window.location.href = '/'; });
+      .then(function () { window.location.href = 'index.html'; });
   });
   document.getElementById('topbarSignin').addEventListener('click', function () {
     document.dispatchEvent(new CustomEvent('topbar:signin-click'));
@@ -1215,7 +1215,7 @@ $('q').addEventListener('input', render);
 $('btnPrint').addEventListener('click', () => window.print());
 // The shared topbar's "Sign in" only fires an event; login lives on the
 // dashboard, so send the user there (they return via the Admin button).
-document.addEventListener('topbar:signin-click', () => { window.location.href = '/'; });
+document.addEventListener('topbar:signin-click', () => { window.location.href = 'index.html'; });
 
 // Page copy comes from the master content tab (data-content / data-content-ph);
 // the hardcoded text is the fallback until a key is filled in the sheet.
@@ -1309,7 +1309,7 @@ load();
   }
 
   async function serverPreview(rows) {
-    const r = await fetch('/api/admin/import/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ tasks:rows }) });
+    const r = await fetch('/api/admin/import/preview', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json', 'x-csrf-token':csrf()}, body:JSON.stringify({ tasks:rows }) });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'could not validate import');
     return d;
@@ -1350,7 +1350,7 @@ load();
       if (invalidSelected.length) throw new Error(`${invalidSelected.length} selected row(s) still need attention.`);
       const batchId = `admin-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       result.textContent = 'Writing selected tasks to individual sheets…';
-      const response = await fetch('/api/admin/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ batchId, tasks:checked.rows }) });
+      const response = await fetch('/api/admin/import/commit', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json', 'x-csrf-token':csrf()}, body:JSON.stringify({ batchId, tasks:checked.rows }) });
       const out = await response.json();
       if (!response.ok && response.status !== 207) throw new Error(out.error || 'import failed');
       const failures = (out.results || []).filter((r) => !r.ok);
@@ -1389,7 +1389,7 @@ load();
     result.textContent = '';
     try {
       const r = await (await fetch('/api/admin/reset', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
         body: JSON.stringify({ dryRun: true }),
       })).json();
       if (!r.ok) { info.textContent = 'Could not check: ' + (r.error || 'error'); return; }
@@ -1407,7 +1407,7 @@ load();
     result.textContent = '';
     try {
       const r = await (await fetch('/api/admin/reset', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
         body: JSON.stringify({ confirm: 'RESET' }),
       })).json();
       if (!r.ok) { result.textContent = 'Reset failed: ' + (r.error || 'error'); goBtn.textContent = 'Wipe all tasks'; return; }
