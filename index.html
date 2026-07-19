@@ -684,7 +684,7 @@
       </button>
     </div>
     <!-- Admin button aligned with sync tools -->
-    <a class="admin-button" id="adminLinkHeader" href="admin.html" data-min-profile-inline="4" style="display:none" title="Admin reports">
+    <a class="admin-button" id="adminLinkHeader" href="admin.html" data-min-profile-inline="3" style="display:none" title="Reports">
       <span data-content-html="AdminIcon" style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"></span>
     </a>
   </div>
@@ -907,6 +907,8 @@
   const CONTENT = {};                 // filled from /api/content; used by the board too
   const state = {
     tab: 'all', tasks: [], projects: [], canWrite: false, profile: 1,
+    // Server-issued capabilities (roles.js). Cosmetic only — server still gates writes.
+    permissions: { canCreate: false, canEdit: false, editScope: 'none', canClassify: false, canSetPriority: false, canViewReports: false, canAdmin: false, canWrite: false },
     displayName: '', username: '',
     dataStale: false, lastUpdated: null, summaryOpen: false, editingId: null,
   };
@@ -1019,7 +1021,8 @@
     state.profile = s.profile || 1;
     state.displayName = s.displayName || '';
     state.username = s.username || '';
-    // Admin-only classification vocabulary — present ONLY in P4 sessions.
+    if (s.permissions) state.permissions = s.permissions;
+    // Super-Admin-only classification vocabulary — present ONLY in P4 sessions.
     state.classifierMeta = s.classifier || null;
     const loggedIn = s.profile > 1;
     // inline profile-gated controls (Admin link only now)
@@ -1042,6 +1045,8 @@
       ]);
       state.tasks = tasksRes.tasks || [];
       state.canWrite = !!tasksRes.canWrite;
+      if (tasksRes.permissions) state.permissions = tasksRes.permissions;
+      if (tasksRes.profile) state.profile = tasksRes.profile;
       state.projects = projRes.projects || [];
       state.dataStale = !!tasksRes.stale || tasksRes.source === 'dev';
       state.lastUpdated = new Date();
@@ -1221,16 +1226,16 @@
     return scheduledTasks().filter((t) => isMyTask(t));
   }
 
+  /** The API sends an opaque per-task ref (never the Task ID) for addressing edits. */
+  function taskRef(t) { return (t && (t.ref || t.id)) || ''; }
+
   /** Who may open the edit form (server still decides what saves). */
   function canEditTask(t) {
-    if (!t || !t.id) return false;
-    if (state.profile >= 4 && state.canWrite) return true;
-    // Profile 3 (moderator): may open the form to approve/classify —
-    // openEdit locks every field except status.
-    if (state.profile === 3) return true;
-    // Profile 2: server already scoped the list to this user's tasks
-    if (state.profile === 2) return true;
-    return false;
+    if (!taskRef(t)) return false;
+    const p = state.permissions || {};
+    if (p.canEdit) return true;
+    // Fallback if an older API omitted permissions.
+    return state.profile >= 2;
   }
 
   function ensureStatusOption(sel, value) {
@@ -1263,27 +1268,26 @@
 
   function openEdit(task) {
     if (!canEditTask(task)) return;
-    state.editingId = task.id;
-    $('eId').value = task.id;
+    state.editingId = taskRef(task);
+    $('eId').value = taskRef(task);
     $('eProjectLabel').textContent = task.projectLabel || task.projectName || '—';
     $('eName').value = task.name || '';
     $('eDesc').value = task.description || '';
     $('eNotes').value = task.notes || '';
     $('ePriority').value = task.priority || 'Low'; // effective priority, computed by the middleware
-    $('ePriority').disabled = state.profile < 4; // only the admin can change priority
-    const isModOrAdmin = state.profile >= 3;
-    updateStatusDropdown($('eStatus'), isModOrAdmin);
+    const perms = state.permissions || {};
+    $('ePriority').disabled = !perms.canSetPriority; // Super Admin only
+    const fullStatusVocab = (perms.editScope === 'status' || perms.editScope === 'all');
+    updateStatusDropdown($('eStatus'), fullStatusVocab);
     ensureStatusOption($('eStatus'), task.status || 'Assigned');
     // Status dropdown is always enabled; the server will reject forbidden status changes.
-    // Even if a P2 user views a task in "Assigned" (admin-only), they can still move it
-    // to user-allowed statuses like Ongoing, Paused, Rejected, or Completed.
     $('eStatus').disabled = false;
-    // Moderator (P3): approve & classify only — every field except status locked
-    const modOnly = state.profile === 3;
+    // Moderator (P3): status only — every other field locked (MASTER.md).
+    const statusOnly = perms.editScope === 'status';
     ['eName', 'eDesc', 'eNotes', 'eDeadline'].forEach((id) => {
       const el = $(id);
-      el.disabled = modOnly;
-      if (modOnly) {
+      el.disabled = statusOnly;
+      if (statusOnly) {
         el.setAttribute('aria-label', 'Locked for moderators (status is the only editable field)');
         el.classList.add('locked-by-role');
       } else {
@@ -1292,12 +1296,10 @@
       }
     });
     $('eDeadline').value = task.endDate || '';
-    // Classifier: ADMIN-ONLY (Vinod, 17-Jul) — invisible to every other
-    // profile; nobody below P4 should even know this field exists. The
-    // control (label + options) is built here from the P4 session payload,
-    // so its vocabulary never ships in the page source.
+    // Classifier: Super Admin only — built from P4 session payload so the
+    // vocabulary never ships in the public page source.
     const cwrap = $('eClassifierWrap');
-    if (state.profile >= 4 && state.classifierMeta) {
+    if (perms.canClassify && state.classifierMeta) {
       if (!$('eClassifier')) {
         const lab = document.createElement('label');
         lab.textContent = state.classifierMeta.label || 'Classification';
@@ -1360,9 +1362,9 @@
       const deadline = t.endDate
         ? `<span class="deadline-inline">${CONTENT['ClockIcon'] || ''}${esc(t.endDate)}</span>` : '';
       const editBtn = editable
-        ? `<div class="task-card-actions"><button type="button" class="btn ghost edit-task-btn" data-task-id="${esc(t.id)}">${esc(CONTENT['Edit-Open'] || 'Edit')}</button></div>`
+        ? `<div class="task-card-actions"><button type="button" class="btn ghost edit-task-btn" data-task-id="${esc(taskRef(t))}">${esc(CONTENT['Edit-Open'] || 'Edit')}</button></div>`
         : '';
-      return `<article class="task-card${editable ? ' is-editable' : ''}" data-task-id="${esc(t.id || '')}" ${editable ? 'tabindex="0" role="button"' : ''}>
+      return `<article class="task-card${editable ? ' is-editable' : ''}" data-task-id="${esc(taskRef(t))}" ${editable ? 'tabindex="0" role="button"' : ''}>
         <div class="task-row">${pri}${assignee}${tags}</div>
         <div class="task-row task-row--title">
           <span class="task-project">${esc(t.projectLabel)}</span>
@@ -1527,6 +1529,13 @@
     // Re-enable Create: a prior submit that threw (network error, non-JSON
     // 502) left the button disabled with nothing to revive it (audit R20).
     $('newForm').querySelector('button[type="submit"]').disabled = false;
+    // Priority is Super Admin only; everyone else lets the clock decide.
+    const canPri = !!(state.permissions && state.permissions.canSetPriority);
+    $('nPriority').disabled = !canPri;
+    if ($('nPriority').parentElement) {
+      $('nPriority').parentElement.style.display = canPri ? '' : 'none';
+    }
+    if (!canPri) $('nPriority').value = 'Medium';
     fillProjectDropdown(); applyPrefill(); newDlg.showModal();
   });
   $('newCancel').addEventListener('click', () => newDlg.close());
@@ -1543,11 +1552,13 @@
     const submit = $('newForm').querySelector('button[type="submit"]');
     submit.disabled = true;
     try {
-      const r = await postJson('/api/tasks', {
+      const body = {
         projectCode: $('nProject').value, name: $('nName').value.trim(),
         description: $('nDesc').value.trim(), notes: $('nNotes').value.trim(),
-        priority: $('nPriority').value, deadline: $('nDeadline').value.trim(),
-      });
+        deadline: $('nDeadline').value.trim(),
+      };
+      if (state.permissions && state.permissions.canSetPriority) body.priority = $('nPriority').value;
+      const r = await postJson('/api/tasks', body);
       let d = {};
       try { d = await r.json(); } catch (err) { d = {}; }
       if (d.ok) {
@@ -1579,7 +1590,7 @@
     const id = (btn && btn.dataset.taskId) || (card && card.dataset.taskId);
     if (!id) return;
     e.preventDefault();
-    const task = state.tasks.find((t) => t.id === id);
+    const task = state.tasks.find((t) => taskRef(t) === id);
     if (task) openEdit(task);
   });
   $('taskList').addEventListener('keydown', (e) => {
@@ -1587,7 +1598,7 @@
     const card = e.target.closest('.task-card.is-editable');
     if (!card || !card.dataset.taskId) return;
     e.preventDefault();
-    const task = state.tasks.find((t) => t.id === card.dataset.taskId);
+    const task = state.tasks.find((t) => taskRef(t) === card.dataset.taskId);
     if (task) openEdit(task);
   });
   $('editForm').addEventListener('submit', async (e) => {

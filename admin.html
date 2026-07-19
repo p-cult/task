@@ -46,9 +46,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin · Reports — Param Culture</title>
 <!--
-  ADMIN REPORTS — a self-contained plugin page (middleware/admin/admin.html).
-  Served at /admin to Profile-4 admins only. Talks to one endpoint:
-  GET /api/admin/data. All filtering, grouping, formatting and export happen
+  ADMIN · REPORTS — plugin page (middleware/admin/admin.html).
+  Reports + activity log: Moderator (P3) and Super Admin (P4).
+  Queue / import / reset: Super Admin only (server-enforced).
+  Talks to GET /api/admin/data. Filtering, grouping, export happen
   here in the browser. No frameworks, no build step, no dependencies.
   Skin variables mirror the main board so it feels like one product.
 
@@ -443,6 +444,7 @@
           <option value="user">User</option>
           <option value="status">Status</option>
           <option value="priority">Priority</option>
+          <option value="classifier">Classification</option>
           <option value="week">Week</option>
           <option value="month">Month</option>
           <option value="year">Year</option>
@@ -456,7 +458,17 @@
           <option value="week">This week</option>
           <option value="month">This month</option>
           <option value="year">This year</option>
+          <option value="range">Custom range</option>
         </select>
+      </div>
+
+      <div class="field" data-queue-hidden id="rangeFields" style="display:none">
+        <label for="fFrom">From</label>
+        <input type="date" id="fFrom">
+      </div>
+      <div class="field" data-queue-hidden id="rangeFieldsTo" style="display:none">
+        <label for="fTo">To</label>
+        <input type="date" id="fTo">
       </div>
 
       <div class="field" data-only="tasks" data-queue-hidden>
@@ -474,6 +486,17 @@
       <div class="field" data-only="tasks" data-queue-hidden>
         <label for="fPriority" data-content="Admin-Priority">Priority</label>
         <select id="fPriority"><option value="">All</option></select>
+      </div>
+      <div class="field" data-only="tasks" data-queue-hidden>
+        <label for="fClass">Mark</label>
+        <select id="fClass">
+          <option value="">All</option>
+          <option value="normal">Normal (unmarked)</option>
+          <option value="any-marked">Any marked</option>
+          <option value="silly">Silly (hidden)</option>
+          <option value="routine">Routine</option>
+          <option value="other">Other</option>
+        </select>
       </div>
 
       <div class="field" data-queue-hidden>
@@ -499,7 +522,7 @@
     <div id="report"><div class="empty">Loading…</div></div>
   </section>
 
-  <section class="panel no-print import-panel" id="bulkImportPanel">
+  <section class="panel no-print import-panel" id="bulkImportPanel" style="display:none">
     <div class="import-head">
       <div>
         <h2>Bulk import tasks</h2>
@@ -576,23 +599,40 @@ fetch('/api/content').then((r) => r.json()).then((d) => {
 // --- load ---
 async function load() {
   let d;
-  try { d = await (await fetch('/api/admin/data')).json(); }
+  try { d = await (await fetch('/api/admin/data', { credentials: 'same-origin' })).json(); }
   catch (e) { $('report').innerHTML = '<div class="empty">Could not reach the server.</div>'; return; }
   if (!d.ok) {
-    $('report').innerHTML = '<div class="empty">This page is for signed-in admins.<br><br>'
+    $('report').innerHTML = '<div class="empty">This page is for Moderators and Super Admins.<br><br>'
       + '<a class="btn primary" href="index.html">Go to sign in &rarr;</a></div>';
-    return; // danger zone stays hidden (default) for non-admins
+    return; // write surfaces stay hidden
   }
-  // Confirmed admin: reveal the reset danger zone.
-  const dz = document.querySelector('.danger-zone'); if (dz) dz.style.display = '';
-  $('bulkImportPanel').style.display = '';
   state.data = d;
   state.meta = d;
-  $('who').textContent = d.admin + (d.stale ? ' · data may be stale' : '');
-  // Topbar role/sign-out is the shared component (middleware/shared/topbar.js)
-  // — it fetches /api/session itself, nothing to wire here.
+  state.caps = d.capabilities || { canViewReports: true, canAdmin: false, canClassify: false };
+  const role = d.profileName || (state.caps.canAdmin ? 'Super Admin' : 'Moderator');
+  $('who').textContent = (d.admin || role) + ' · ' + role + (d.stale ? ' · data may be stale' : '');
+
+  // Page chrome: Moderators get "Reports"; Super Admin keeps Admin · Reports.
+  const titleEl = document.querySelector('header.app h1');
+  const subEl = document.querySelector('header.app .subtitle');
+  if (titleEl) titleEl.textContent = state.caps.canAdmin ? 'Admin · Reports' : 'Reports';
+  if (subEl) {
+    subEl.textContent = state.caps.canAdmin
+      ? 'Param Culture — task activity, queue & reports'
+      : 'Param Culture — task activity & reports';
+  }
+  document.title = state.caps.canAdmin ? 'Admin · Reports' : 'Reports';
+
+  // Write surfaces: Super Admin only (server still enforces).
+  const dz = document.querySelector('.danger-zone');
+  if (dz) dz.style.display = state.caps.canAdmin ? '' : 'none';
+  if ($('bulkImportPanel')) $('bulkImportPanel').style.display = state.caps.canAdmin ? '' : 'none';
+  document.querySelectorAll('[data-view="queue"]').forEach((btn) => {
+    btn.style.display = state.caps.canAdmin ? '' : 'none';
+  });
+
   buildFilterOptions();
-  buildImportOptions();
+  if (state.caps.canAdmin) buildImportOptions();
   render();
 }
 
@@ -622,6 +662,15 @@ function fill(sel, values) {
 // --- filter + group ---
 function inPeriod(r, period) {
   if (period === 'all') return true;
+  if (period === 'range') {
+    const from = $('fFrom') && $('fFrom').value ? Date.parse($('fFrom').value + 'T00:00:00') : null;
+    const to = $('fTo') && $('fTo').value ? Date.parse($('fTo').value + 'T23:59:59') : null;
+    if (from == null && to == null) return true;
+    if (r.ms == null) return false;
+    if (from != null && !isNaN(from) && r.ms < from) return false;
+    if (to != null && !isNaN(to) && r.ms > to) return false;
+    return true;
+  }
   if (r.year == null) return false;
   if (period === 'year') return r.year === CUR.year;
   if (period === 'month') return r.year === CUR.year && r.month === CUR.month;
@@ -636,15 +685,21 @@ function filtered() {
   const fu = tasksView ? $('fUser').value : '';
   const fs = tasksView ? $('fStatus').value : '';
   const fpr = tasksView ? $('fPriority').value : '';
+  const fc = tasksView && $('fClass') ? $('fClass').value : '';
   return activeRows().filter((r) => {
     if (!inPeriod(r, period)) return false;
     if (fp && r.project !== fp) return false;
     if (fu && r.user !== fu) return false;
     if (fs && r.status !== fs) return false;
     if (fpr && r.priority !== fpr) return false;
+    if (fc === 'normal') {
+      if (String(r.classifier || '').trim()) return false;
+    } else if (fc === 'any-marked') {
+      if (!String(r.classifier || '').trim()) return false;
+    } else if (fc && String(r.classifier || '') !== fc) return false;
     if (q) {
       const hay = tasksView
-        ? `${r.name} ${r.project} ${r.user} ${r.taskId} ${r.status}`
+        ? `${r.name} ${r.notes || ''} ${r.project} ${r.user} ${r.taskId} ${r.status} ${r.classifier || ''}`
         : `${r.action} ${r.user} ${r.taskId} ${r.name} ${r.details}`;
       if (hay.toLowerCase().indexOf(q) < 0) return false;
     }
@@ -656,6 +711,7 @@ function groupKeyLabel(r, by) {
     case 'user': return [r.user || '—', r.user || '—'];
     case 'status': return [r.status || '—', r.status || '—'];
     case 'priority': return [r.priority || '—', r.priority || '—'];
+    case 'classifier': return [r.classifier || 'normal', r.classifier || 'normal (unmarked)'];
     case 'year': return r.year == null ? ['~undated','Undated'] : [String(r.year), String(r.year)];
     case 'month': return r.year == null ? ['~undated','Undated']
       : [`${r.year}-${String(r.month).padStart(2,'0')}`, `${r.monthName} ${r.year}`];
@@ -713,16 +769,18 @@ function render() {
 
 function taskTable(rows) {
   return `<table><thead><tr>
-      <th>Task ID</th><th>Name</th><th>Project</th><th>User</th>
-      <th>Priority</th><th>Status</th><th>Assigned</th><th>Deadline</th>
+      <th>Task ID</th><th>Name</th><th>Notes</th><th>Project</th><th>User</th>
+      <th>Priority</th><th>Status</th><th>Mark</th><th>Assigned</th><th>Deadline</th>
     </tr></thead><tbody>` +
     rows.map((r) => `<tr>
       <td class="tid">${esc(r.taskId)}</td>
       <td class="name">${esc(r.name)}</td>
+      <td>${esc(r.notes || '—')}</td>
       <td>${esc(r.project)}</td>
       <td>${esc(r.user)}</td>
       <td><span class="chip ${esc(r.priority)}">${esc(r.priority)}</span></td>
       <td><span class="status ${String(r.status).toLowerCase() === 'completed' ? 'completed' : ''}">${esc(r.status)}</span>${r.logged ? ' <span class="dot-logged" title="synced">●</span>' : ''}</td>
+      <td>${esc(r.classifier || '—')}</td>
       <td>${esc(r.assignedDate || '—')}</td>
       <td>${esc(r.deadline || '—')}</td>
     </tr>`).join('') + '</tbody></table>';
@@ -1082,10 +1140,12 @@ function logTable(rows) {
 function renderCards(rows) {
   let cards = [];
   if (state.view === 'tasks') {
-    const done = rows.filter((r) => String(r.status).toLowerCase() === 'completed').length;
+    // Real completed excludes routine/silly (countsCompleted from report engine).
+    const done = rows.filter((r) => r.countsCompleted).length;
+    const marked = rows.filter((r) => String(r.classifier || '').trim()).length;
     const projects = new Set(rows.map((r) => r.project)).size;
     const users = new Set(rows.map((r) => r.user)).size;
-    cards = [['Tasks', rows.length], ['Completed', done], ['Open', rows.length - done], ['Projects', projects], ['People', users]];
+    cards = [['Tasks', rows.length], ['Completed', done], ['Marked', marked], ['Projects', projects], ['People', users]];
   } else {
     const creates = rows.filter((r) => r.action === 'CREATE').length;
     const updates = rows.filter((r) => r.action === 'UPDATE').length;
@@ -1102,7 +1162,7 @@ function renderMeta(rows) {
   const bits = [];
   if ($('period').value !== 'all') bits.push(period);
   if (state.view === 'tasks') {
-    ['fProject','fUser','fStatus','fPriority'].forEach((id) => { if ($(id).value) bits.push($(id).value); });
+    ['fProject','fUser','fStatus','fPriority','fClass'].forEach((id) => { if ($(id) && $(id).value) bits.push($(id).value); });
   }
   if ($('q').value.trim()) bits.push('“' + $('q').value.trim() + '”');
   $('reportMeta').innerHTML = `<h1>Param Culture — ${esc(view)}</h1>`
@@ -1113,7 +1173,7 @@ function renderMeta(rows) {
 // --- exports ---
 function currentColumns() {
   return state.view === 'tasks'
-    ? [['taskId','Task ID'],['name','Name'],['project','Project'],['user','User'],['priority','Priority'],['status','Status'],['assignedDate','Assigned'],['deadline','Deadline']]
+    ? [['taskId','Task ID'],['name','Name'],['notes','Notes'],['project','Project'],['user','User'],['priority','Priority'],['status','Status'],['classifier','Mark'],['assignedDate','Assigned'],['deadline','Deadline']]
     : [['when','When'],['action','Action'],['user','User'],['taskId','Task ID'],['details','Details']];
 }
 function download(filename, text, mime) {
@@ -1197,8 +1257,16 @@ function exportMarkdown() {
 }
 
 // --- wire ---
+function syncRangeFields() {
+  const on = $('period').value === 'range';
+  if ($('rangeFields')) $('rangeFields').style.display = on ? '' : 'none';
+  if ($('rangeFieldsTo')) $('rangeFieldsTo').style.display = on ? '' : 'none';
+}
+
 $('viewSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
+  // Queue is Super Admin only — cosmetic hide + block if forced.
+  if (b.dataset.view === 'queue' && !(state.caps && state.caps.canAdmin)) return;
   state.view = b.dataset.view;
   document.querySelectorAll('#viewSeg button').forEach((x) => x.classList.toggle('on', x === b));
   // sensible default grouping per view
@@ -1208,10 +1276,16 @@ $('viewSeg').addEventListener('click', (e) => {
 });
 $('report').addEventListener('click', (e) => {
   const b = e.target.closest('[data-queue-action]'); if (!b) return;
+  if (!(state.caps && state.caps.canAdmin)) return;
   decideQueue(b.dataset.queueRow, b.dataset.queueAction);
 });
-['groupBy','period','fProject','fUser','fStatus','fPriority'].forEach((id) => $(id).addEventListener('change', render));
+['groupBy','period','fProject','fUser','fStatus','fPriority','fClass','fFrom','fTo'].forEach((id) => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener('change', () => { syncRangeFields(); render(); });
+});
 $('q').addEventListener('input', render);
+syncRangeFields();
 $('btnPrint').addEventListener('click', () => window.print());
 // The shared topbar's "Sign in" only fires an event; login lives on the
 // dashboard, so send the user there (they return via the Admin button).
