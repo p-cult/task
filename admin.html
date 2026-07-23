@@ -568,6 +568,22 @@
     </div>
     <div id="resetResult" class="dz-info"></div>
   </section>
+
+  <section class="panel no-print danger-zone" style="display:none">
+    <h2 class="dz-title">🧹 Purge duplicates</h2>
+    <p class="dz-note">Removes duplicate rows (user- or system-generated) from the master board, keeping ONE row per real task — the most-progressed status. Preview first; the full pre-purge data is returned as a backup and Google Sheets → File → Version history can restore the tab. This cannot be undone from here.</p>
+    <div class="dz-actions">
+      <button class="btn" id="btnDedupPreview">Preview duplicates</button>
+      <span id="dedupInfo" class="dz-info"></span>
+    </div>
+    <div id="dedupConfirm" class="dz-confirm" style="display:none">
+      <label class="dz-info">Type <b>PURGE</b> to remove the duplicates:</label>
+      <input id="dedupPhrase" type="text" autocomplete="off" placeholder="PURGE">
+      <button class="btn danger" id="btnDedupGo" disabled>Purge duplicates</button>
+      <button class="btn" id="btnDedupCancel">Cancel</button>
+    </div>
+    <div id="dedupResult" class="dz-info"></div>
+  </section>
 </main>
 
 <script>
@@ -624,8 +640,9 @@ async function load() {
   document.title = state.caps.canAdmin ? 'Admin · Reports' : 'Reports';
 
   // Write surfaces: Super Admin only (server still enforces).
-  const dz = document.querySelector('.danger-zone');
-  if (dz) dz.style.display = state.caps.canAdmin ? '' : 'none';
+  document.querySelectorAll('.danger-zone').forEach((dz) => {
+    dz.style.display = state.caps.canAdmin ? '' : 'none';
+  });
   if ($('bulkImportPanel')) $('bulkImportPanel').style.display = state.caps.canAdmin ? '' : 'none';
   document.querySelectorAll('[data-view="queue"]').forEach((btn) => {
     btn.style.display = state.caps.canAdmin ? '' : 'none';
@@ -769,7 +786,7 @@ function render() {
 
 function taskTable(rows) {
   return `<table><thead><tr>
-      <th>Task ID</th><th>Name</th><th>Notes</th><th>Project</th><th>User</th>
+      <th>Ref</th><th>Name</th><th>Notes</th><th>Project</th><th>User</th>
       <th>Priority</th><th>Status</th><th>Mark</th><th>Assigned</th><th>Deadline</th>
     </tr></thead><tbody>` +
     rows.map((r) => `<tr>
@@ -1126,7 +1143,7 @@ async function retryWithResolvedProjects(resolved, dialog) {
 }
 function logTable(rows) {
   return `<table><thead><tr>
-      <th>When</th><th>Action</th><th>User</th><th>Task ID</th><th>Details</th>
+      <th>When</th><th>Action</th><th>User</th><th>Ref</th><th>Details</th>
     </tr></thead><tbody>` +
     rows.map((r) => `<tr>
       <td>${esc(r.when || '—')}</td>
@@ -1173,8 +1190,8 @@ function renderMeta(rows) {
 // --- exports ---
 function currentColumns() {
   return state.view === 'tasks'
-    ? [['taskId','Task ID'],['name','Name'],['notes','Notes'],['project','Project'],['user','User'],['priority','Priority'],['status','Status'],['classifier','Mark'],['assignedDate','Assigned'],['deadline','Deadline']]
-    : [['when','When'],['action','Action'],['user','User'],['taskId','Task ID'],['details','Details']];
+    ? [['taskId','Ref'],['name','Name'],['notes','Notes'],['project','Project'],['user','User'],['priority','Priority'],['status','Status'],['classifier','Mark'],['assignedDate','Assigned'],['deadline','Deadline']]
+    : [['when','When'],['action','Action'],['user','User'],['taskId','Ref'],['details','Details']];
 }
 function download(filename, text, mime) {
   const blob = new Blob([text], { type: mime });
@@ -1490,6 +1507,55 @@ load();
       confirmRow.style.display = 'none'; info.textContent = '';
       setTimeout(() => location.reload(), 1500);
     } catch (e) { result.textContent = 'Could not reach the server.'; goBtn.textContent = 'Wipe all tasks'; }
+  });
+})();
+
+// ---- Purge duplicates ----
+(function () {
+  const info = $('dedupInfo'), confirmRow = $('dedupConfirm'), phrase = $('dedupPhrase');
+  const goBtn = $('btnDedupGo'), previewBtn = $('btnDedupPreview'), result = $('dedupResult');
+  const cancelBtn = $('btnDedupCancel');
+  if (!previewBtn) return;
+
+  function cancel() {
+    confirmRow.style.display = 'none'; phrase.value = ''; goBtn.disabled = true;
+    info.textContent = ''; result.textContent = '';
+  }
+  cancelBtn.addEventListener('click', cancel);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && confirmRow.style.display !== 'none') cancel();
+  });
+
+  previewBtn.addEventListener('click', async () => {
+    info.textContent = 'Scanning…'; result.textContent = '';
+    try {
+      const r = await (await fetch('/api/admin/dedup', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+        body: JSON.stringify({ dryRun: true }),
+      })).json();
+      if (!r.ok) { info.textContent = 'Could not scan: ' + (r.error || 'error'); return; }
+      info.textContent = `${r.totalRows} rows → ${r.realTasks} real tasks. Would clear ${r.duplicateRowsToClear} duplicate row(s) across ${r.duplicateGroups} task(s).`;
+      confirmRow.style.display = 'flex';
+    } catch (e) { info.textContent = 'Could not reach the server.'; }
+  });
+
+  phrase.addEventListener('input', () => { goBtn.disabled = phrase.value.trim() !== 'PURGE'; });
+
+  goBtn.addEventListener('click', async () => {
+    if (phrase.value.trim() !== 'PURGE') return;
+    goBtn.disabled = true; goBtn.textContent = 'Purging…'; result.textContent = '';
+    try {
+      const r = await (await fetch('/api/admin/dedup', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+        body: JSON.stringify({ confirm: 'PURGE' }),
+      })).json();
+      if (!r.ok) { result.textContent = 'Purge failed: ' + (r.error || 'error'); goBtn.textContent = 'Purge duplicates'; return; }
+      result.textContent = `✓ Done — cleared ${r.cleared} duplicate row(s); ${r.realTasksRemaining} real tasks remain. Reloading…`;
+      confirmRow.style.display = 'none'; info.textContent = '';
+      setTimeout(() => location.reload(), 1800);
+    } catch (e) { result.textContent = 'Could not reach the server.'; goBtn.textContent = 'Purge duplicates'; }
   });
 })();
 </script>
