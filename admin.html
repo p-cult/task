@@ -584,6 +584,23 @@
     </div>
     <div id="dedupResult" class="dz-info"></div>
   </section>
+
+  <section class="panel no-print danger-zone" style="display:none">
+    <h2 class="dz-title">📥 Pull a user's sheet</h2>
+    <p class="dz-note">For rows a teammate typed straight into their own Google Sheet that never reached the board (auto-sync is off). Pulls ONLY the chosen person's sheet — no one else's — so it can't re-create the duplicate problem. Rows already on the board (with a Task ID) are left alone; only genuinely new rows are added. Preview first to see the count.</p>
+    <div class="dz-actions">
+      <select id="pullUser"><option value="">Choose a person…</option></select>
+      <button class="btn" id="btnPullPreview">Preview</button>
+      <span id="pullInfo" class="dz-info"></span>
+    </div>
+    <div id="pullConfirm" class="dz-confirm" style="display:none">
+      <label class="dz-info">Type <b>PULL</b> to add these rows to the board:</label>
+      <input id="pullPhrase" type="text" autocomplete="off" placeholder="PULL">
+      <button class="btn" id="btnPullGo" disabled>Pull rows</button>
+      <button class="btn" id="btnPullCancel">Cancel</button>
+    </div>
+    <div id="pullResult" class="dz-info"></div>
+  </section>
 </main>
 
 <script>
@@ -655,7 +672,10 @@ async function load() {
 
 function buildImportOptions() {
   const users = (state.data && state.data.users) || [];
-  $('importBulkUser').innerHTML = '<option value="">Choose…</option>' + users.map((u) => `<option value="${esc(u.userSheet)}">${esc(u.name)}</option>`).join('');
+  const opts = '<option value="">Choose…</option>' + users.map((u) => `<option value="${esc(u.userSheet)}">${esc(u.name)}</option>`).join('');
+  $('importBulkUser').innerHTML = opts;
+  const pullSel = $('pullUser');
+  if (pullSel) pullSel.innerHTML = '<option value="">Choose a person…</option>' + users.map((u) => `<option value="${esc(u.userSheet)}">${esc(u.name)}</option>`).join('');
 }
 
 function activeRows() {
@@ -1556,6 +1576,71 @@ load();
       confirmRow.style.display = 'none'; info.textContent = '';
       setTimeout(() => location.reload(), 1800);
     } catch (e) { result.textContent = 'Could not reach the server.'; goBtn.textContent = 'Purge duplicates'; }
+  });
+})();
+
+// ---- Pull a user's sheet ----
+(function () {
+  const sel = $('pullUser'), info = $('pullInfo'), confirmRow = $('pullConfirm');
+  const phrase = $('pullPhrase'), goBtn = $('btnPullGo'), previewBtn = $('btnPullPreview');
+  const cancelBtn = $('btnPullCancel'), result = $('pullResult');
+  if (!previewBtn) return;
+  let target = '';
+
+  function cancel() {
+    confirmRow.style.display = 'none'; phrase.value = ''; goBtn.disabled = true;
+    info.textContent = ''; result.textContent = '';
+  }
+  cancelBtn.addEventListener('click', cancel);
+  sel.addEventListener('change', cancel);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && confirmRow.style.display !== 'none') cancel();
+  });
+
+  previewBtn.addEventListener('click', async () => {
+    target = sel.value;
+    if (!target) { info.textContent = 'Choose a person first.'; return; }
+    info.textContent = 'Reading sheet…'; result.textContent = ''; confirmRow.style.display = 'none';
+    try {
+      const r = await (await fetch('/api/admin/pull', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+        body: JSON.stringify({ user: target, dryRun: true }),
+      })).json();
+      if (!r.ok) { info.textContent = 'Could not read: ' + (r.error || 'error'); return; }
+      let msg = `Would add ${r.willAdd} new row(s)`;
+      if (r.willUpdate) msg += `, update ${r.willUpdate}`;
+      if (r.alreadyPresent) msg += `; ${r.alreadyPresent} already on the board`;
+      if (r.skipped) msg += `; ${r.skipped} skipped (${(r.skips || []).map((s) => s.reason).join(', ')})`;
+      msg += '.';
+      if (r.adds && r.adds.length) msg += ' New: ' + r.adds.slice(0, 8).map((a) => a.name).filter(Boolean).join(', ') + (r.adds.length > 8 ? '…' : '');
+      info.textContent = msg;
+      if (r.willAdd || r.willUpdate) confirmRow.style.display = 'flex';
+      else result.textContent = 'Nothing new to pull.';
+    } catch (e) { info.textContent = 'Could not reach the server.'; }
+  });
+
+  phrase.addEventListener('input', () => { goBtn.disabled = phrase.value.trim() !== 'PULL'; });
+
+  goBtn.addEventListener('click', async () => {
+    if (phrase.value.trim() !== 'PULL' || !target) return;
+    goBtn.disabled = true; goBtn.textContent = 'Pulling…'; result.textContent = '';
+    try {
+      const r = await (await fetch('/api/admin/pull', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf() },
+        body: JSON.stringify({ user: target, confirm: 'PULL' }),
+      })).json();
+      if (!r.ok) { result.textContent = 'Pull failed: ' + (r.error || 'error'); goBtn.textContent = 'Pull rows'; return; }
+      let msg = `✓ Done — added ${r.added} row(s)`;
+      if (r.updated) msg += `, updated ${r.updated}`;
+      if (r.skipped) msg += `, ${r.skipped} skipped`;
+      if (r.errors && r.errors.length) msg += `, ${r.errors.length} error(s)`;
+      msg += '. Reloading…';
+      result.textContent = msg;
+      confirmRow.style.display = 'none'; info.textContent = '';
+      setTimeout(() => location.reload(), 1800);
+    } catch (e) { result.textContent = 'Could not reach the server.'; goBtn.textContent = 'Pull rows'; }
   });
 })();
 </script>
