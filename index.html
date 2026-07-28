@@ -1371,8 +1371,16 @@
         : (t.status ? `<span class="chip st-${esc(String(t.status).replace(/\s+/g, ''))}">${esc(statusLabel)}</span>` : '');
       const deadline = t.endDate
         ? `<span class="deadline-inline">${CONTENT['ClockIcon'] || ''}${esc(t.endDate)}</span>` : '';
-      const editBtn = editable
-        ? `<div class="task-card-actions"><button type="button" class="btn ghost edit-task-btn" data-task-id="${esc(taskRef(t))}">${esc(CONTENT['Edit-Open'] || 'Edit')}</button></div>`
+      // "Make Task" promotes a Logged entry to a real task (clears classifier).
+      // Admin (P4) + Moderator (P3) only.
+      const makeTaskBtn = (isLoggedEntry(t) && state.profile >= 3)
+        ? `<button type="button" class="btn make-task-btn" data-task-id="${esc(taskRef(t))}">${esc(CONTENT['Make-Task'] || 'Make Task')}</button>`
+        : '';
+      const editInner = editable
+        ? `<button type="button" class="btn ghost edit-task-btn" data-task-id="${esc(taskRef(t))}">${esc(CONTENT['Edit-Open'] || 'Edit')}</button>`
+        : '';
+      const editBtn = (makeTaskBtn || editInner)
+        ? `<div class="task-card-actions">${makeTaskBtn}${editInner}</div>`
         : '';
       return `<article class="task-card${editable ? ' is-editable' : ''}" data-task-id="${esc(taskRef(t))}" ${editable ? 'tabindex="0" role="button"' : ''}>
         <div class="task-row">${pri}${assignee}${tags}</div>
@@ -1598,7 +1606,14 @@
   // edit task — UI ready; waits for Claude's PATCH /api/tasks/:id
   const editDlg = $('editDlg');
   $('editCancel').addEventListener('click', () => { state.editingId = null; editDlg.close(); });
-  $('taskList').addEventListener('click', (e) => {
+  $('taskList').addEventListener('click', async (e) => {
+    const mk = e.target.closest('.make-task-btn');
+    if (mk) {
+      e.preventDefault();
+      e.stopPropagation();
+      await makeTask(mk);
+      return;
+    }
     const btn = e.target.closest('.edit-task-btn');
     const card = e.target.closest('.task-card.is-editable');
     const id = (btn && btn.dataset.taskId) || (card && card.dataset.taskId);
@@ -1607,6 +1622,31 @@
     const task = state.tasks.find((t) => taskRef(t) === id);
     if (task) openEdit(task);
   });
+
+  // Promote a Logged entry to a real task by clearing its classifier.
+  async function makeTask(btn) {
+    const id = btn.dataset.taskId;
+    if (!id) return;
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = CONTENT['Make-Task-Working'] || 'Making…';
+    try {
+      const r = await patchJson('/api/tasks/' + encodeURIComponent(id), { classifier: '' });
+      let d = {};
+      try { d = await r.json(); } catch (err) { d = {}; }
+      if (!r.ok || !d.ok) {
+        btn.disabled = false;
+        btn.textContent = original;
+        alert(d.error || 'Could not make this a task.');
+        return;
+      }
+      await loadBoard();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = original;
+      alert('Could not reach the server.');
+    }
+  }
   $('taskList').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const card = e.target.closest('.task-card.is-editable');
