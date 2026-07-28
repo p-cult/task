@@ -587,7 +587,7 @@
 
   <section class="panel no-print danger-zone" style="display:none">
     <h2 class="dz-title">📥 Pull a user's sheet</h2>
-    <p class="dz-note">For rows a teammate typed straight into their own Google Sheet that never reached the board (auto-sync is off). Pulls ONLY the chosen person's sheet — no one else's — so it can't re-create the duplicate problem. Rows already on the board (with a Task ID) are left alone; only genuinely new rows are added. Preview first to see the count.</p>
+    <p class="dz-note">For rows a teammate typed straight into their own Google Sheet that never reached the board (auto-sync is off). Pulls ONLY the chosen person's sheet — no one else's — so it can't re-create the duplicate problem. Rows already on the board (same name) are left alone. Pulled rows land in that person's <b>Logged</b> tab (not the active task board), so the board is never flooded — a real task can be promoted from there later. Preview first to see the count.</p>
     <div class="dz-actions">
       <select id="pullUser"><option value="">Choose a person…</option></select>
       <button class="btn" id="btnPullPreview">Preview</button>
@@ -1608,7 +1608,7 @@ load();
         body: JSON.stringify({ user: target, dryRun: true }),
       })).json();
       if (!r.ok) { info.textContent = 'Could not read: ' + (r.error || 'error'); return; }
-      let msg = `Would add ${r.willAdd} new row(s)`;
+      let msg = `Would add ${r.willAdd} row(s) to the user's Logged tab`;
       if (r.willUpdate) msg += `, update ${r.willUpdate}`;
       const onBoard = (r.alreadyOnBoard || 0) + (r.alreadyPresent || 0);
       if (onBoard) msg += `; ${onBoard} already on the board (left alone)`;
@@ -1633,7 +1633,7 @@ load();
         body: JSON.stringify({ user: target, confirm: 'PULL' }),
       })).json();
       if (!r.ok) { result.textContent = 'Pull failed: ' + (r.error || 'error'); goBtn.textContent = 'Pull rows'; return; }
-      let msg = `✓ Done — added ${r.added} row(s)`;
+      let msg = `✓ Done — added ${r.added} row(s) to the user's Logged tab`;
       if (r.updated) msg += `, updated ${r.updated}`;
       if (r.skipped) msg += `, ${r.skipped} skipped`;
       if (r.errors && r.errors.length) msg += `, ${r.errors.length} error(s)`;

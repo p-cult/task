@@ -730,6 +730,7 @@
           <button class="tab active" data-tab="all"><span data-content="Board-All">All Tasks</span> <span class="tab-count" id="tabCountAll">0</span></button>
           <button class="tab" data-tab="mine" data-min-profile-inline="2" style="display:none"><span data-content="Board-Mine">My Tasks</span> <span class="tab-count" id="tabCountMine">0</span></button>
           <button class="tab" data-tab="completed"><span data-content="Board-Completed">Completed</span> <span class="tab-count" id="tabCountCompleted">0</span></button>
+          <button class="tab" data-tab="logged"><span data-content="Board-Logged">Logged</span> <span class="tab-count" id="tabCountLogged">0</span></button>
         </div>
         <span class="spacer"></span>
         <button class="btn" id="newTaskBtn" data-min-profile-inline="2" style="display:none">
@@ -1060,15 +1061,20 @@
   }
 
   function isCompletedTask(t) { return !!(t.logged || t.approved || String(t.status).toLowerCase() === 'completed'); }
-  function scheduledTasks(list) { return (list || state.tasks).filter((t) => !isCompletedTask(t)); }
-  function completedTasks(list) { return (list || state.tasks).filter((t) => isCompletedTask(t)); }
+  // "Logged" = a routine/log entry (e.g. a daily work note pulled from a user's
+  // sheet). Kept and visible in its own tab, but never on the active board or
+  // counted as a task. Classifier is the master-only judgement column (N).
+  function isLoggedEntry(t) { return String(t.classifier || '').toLowerCase() === 'routine'; }
+  function scheduledTasks(list) { return (list || state.tasks).filter((t) => !isCompletedTask(t) && !isLoggedEntry(t)); }
+  function completedTasks(list) { return (list || state.tasks).filter((t) => isCompletedTask(t) && !isLoggedEntry(t)); }
+  function loggedEntries(list) { return (list || state.tasks).filter((t) => isLoggedEntry(t)); }
 
   /* Priority is computed by the middleware (middleware/priority.js) — the
      single truth for board, reports, and API. Tasks arrive with .priority
      (effective) and .overdue already stamped; the frontend only displays. */
 
   function updateSummary() {
-    $('statTotal').textContent = String(state.tasks.length);
+    $('statTotal').textContent = String(state.tasks.filter((t) => !isLoggedEntry(t)).length);
     $('statScheduled').textContent = String(scheduledTasks().length);
     $('statCompleted').textContent = String(completedTasks().length);
     renderOverviewStrips();
@@ -1081,6 +1087,7 @@
     state.tasks.forEach((t) => {
       const who = t.assignedTo || '';
       if (!who) return;
+      if (isLoggedEntry(t)) return; // logged notes are not tasks — keep them out of the strip counts
       if (!byUser.has(who)) byUser.set(who, { total: 0, scheduled: 0, completed: 0 });
       const s = byUser.get(who);
       s.total += 1;
@@ -1115,6 +1122,7 @@
     $('tabCountAll').textContent = String(scheduledTasks().length);
     $('tabCountMine').textContent = String(myScheduledTasks().length);
     $('tabCountCompleted').textContent = String(completedTasks().length);
+    if ($('tabCountLogged')) $('tabCountLogged').textContent = String(loggedEntries().length);
   }
 
   function setSummaryOpen(open) {
@@ -1153,13 +1161,15 @@
   function visibleTasks() {
     let list = state.tasks.slice();
     if (state.tab === 'mine') list = list.filter((t) => isMyTask(t));
-    if (state.tab === 'completed') {
-      list = list.filter((t) => isCompletedTask(t));
+    if (state.tab === 'logged') {
+      list = list.filter((t) => isLoggedEntry(t));
+    } else if (state.tab === 'completed') {
+      list = list.filter((t) => isCompletedTask(t) && !isLoggedEntry(t));
       const cf = $('fCompleted').value;
       if (cf === 'approved') list = list.filter((t) => t.approved);
       else if (cf === 'logged') list = list.filter((t) => t.logged && !t.approved);
     } else {
-      list = list.filter((t) => !isCompletedTask(t));
+      list = list.filter((t) => !isCompletedTask(t) && !isLoggedEntry(t));
     }
     const user = $('fUser').value, st = $('fStatus').value, pri = $('fPriority').value;
     const q = $('fSearch').value.trim().toLowerCase();
@@ -1379,7 +1389,11 @@
     }).join('');
 
     $('emptyRow').style.display = rows.length ? 'none' : 'block';
-    $('emptyRow').textContent = (state.tab === 'completed' ? CONTENT['Empty-Completed'] : CONTENT['Empty-Tasks']) || 'No tasks to show.';
+    $('emptyRow').textContent = (
+      state.tab === 'completed' ? CONTENT['Empty-Completed']
+      : state.tab === 'logged' ? (CONTENT['Empty-Logged'] || 'No logged entries yet.')
+      : CONTENT['Empty-Tasks']
+    ) || 'No tasks to show.';
     updateSummary();
     updateTabCounts();
   }
