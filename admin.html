@@ -1610,8 +1610,9 @@ load();
       if (!r.ok) { info.textContent = 'Could not read: ' + (r.error || 'error'); return; }
       let msg = `Would add ${r.willAdd} new row(s)`;
       if (r.willUpdate) msg += `, update ${r.willUpdate}`;
-      if (r.alreadyPresent) msg += `; ${r.alreadyPresent} already on the board`;
-      if (r.skipped) msg += `; ${r.skipped} skipped (${(r.skips || []).map((s) => s.reason).join(', ')})`;
+      const onBoard = (r.alreadyOnBoard || 0) + (r.alreadyPresent || 0);
+      if (onBoard) msg += `; ${onBoard} already on the board (left alone)`;
+      if (r.skipped) msg += `; ${r.skipped} skipped (${[...new Set((r.skips || []).map((s) => s.reason))].join(', ')})`;
       msg += '.';
       if (r.adds && r.adds.length) msg += ' New: ' + r.adds.slice(0, 8).map((a) => a.name).filter(Boolean).join(', ') + (r.adds.length > 8 ? '…' : '');
       info.textContent = msg;
