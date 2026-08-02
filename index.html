@@ -3731,6 +3731,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
     function overviewAssigneeKey(t) {
       return String((t && (t.assigneeUsername || t.assigneeDisplayName)) || '').trim();
     }
+    /** Admin is a control account — never a person strip on Overview. */
+    function isOverviewPerson(t) {
+      const u = String((t && t.assigneeUsername) || '').trim().toLowerCase();
+      const d = String((t && t.assigneeDisplayName) || '').trim().toLowerCase();
+      if (!u && !d) return false;
+      if (u === 'admin' || d === 'admin') return false;
+      return true;
+    }
     function overviewAssigneeLabel(who) {
       const key = String(who || '').trim();
       if (!key) return '—';
@@ -3767,8 +3775,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
     function renderOverviewStrips() {
       const byUser = new Map();
       overviewTaskList().forEach((t) => {
+        if (isLoggedEntry(t) || !isOverviewPerson(t)) return;
         const who = overviewAssigneeKey(t);
-        if (!who || isLoggedEntry(t)) return;
+        if (!who) return;
         if (!byUser.has(who)) byUser.set(who, { total: 0, scheduled: 0, completed: 0 });
         const s = byUser.get(who);
         s.total += 1;
