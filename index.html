@@ -487,9 +487,6 @@ body[data-source="error"] .offline { display: block; }
 .smart-filter {
   margin-bottom: 0.85rem; padding: 0.55rem 0.65rem;
   display: flex; flex-direction: column; gap: 0.35rem;
-  width: 25%;
-  max-width: 25%;
-  box-sizing: border-box;
 }
 .inject-bulk,
 .needs-bulk {
@@ -1105,7 +1102,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
     textarea { min-height: 3.2rem; }
     .row { display: flex; gap: .4rem; margin-top: .8rem; flex-wrap: wrap; }
     .filters input, .filters select { width: auto; min-width: 6rem; }
-    .smart-filter { /* chrome → skin-map */ margin: 0 0 .75rem; width: 25%; max-width: 25%; box-sizing: border-box; }
+    .smart-filter { /* chrome → skin-map */ margin: 0 0 .75rem; }
     .sf-chips { display: flex; flex-wrap: wrap; gap: .35rem; min-height: 0; margin-bottom: .35rem; }
     .sf-chips:empty { display: none; }
     .sf-chip {
@@ -1118,7 +1115,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
       font: inherit; font-size: .9rem; line-height: 1; padding: 0 .1rem; opacity: .75;
     }
     .sf-chip button:hover { opacity: 1; }
-    .sf-input-wrap { position: relative; }
+    .sf-input-wrap { position: relative; width: 25%; max-width: 25%; box-sizing: border-box; }
     .sf-input-wrap input { width: 100%; }
     .sf-suggest {
       position: absolute; left: 0; right: 0; top: calc(100% + .2rem); z-index: 8;
